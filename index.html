@@ -75,6 +75,11 @@
         <span id="timer" class="text-sm font-mono ml-2">00:00</span>
     </div>
 
+    <!-- 解像度不足（アップスケール発生中）の警告バッジ -->
+    <div id="resWarning" class="fixed top-20 left-6 flex items-center gap-2 bg-amber-500/90 backdrop-blur-md px-4 py-2 rounded-full z-20 hidden">
+        <span class="text-xs font-bold text-black">⚠ Source resolution below target — upscaled</span>
+    </div>
+
     <!-- カメラ切り替え -->
     <button id="switchCamera" class="fixed top-6 right-6 p-4 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white z-20 active:scale-90 transition-transform">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -133,6 +138,7 @@
         const log = document.getElementById('log');
         const timerDisplay = document.getElementById('timer');
         const recordingIndicator = document.getElementById('recordingIndicator');
+        const resWarning = document.getElementById('resWarning');
         const switchCameraBtn = document.getElementById('switchCamera');
         const uiOverlay = document.getElementById('ui-overlay');
 
@@ -155,12 +161,21 @@
         // ▼ ここで「常にこのピクセルサイズで録画する」というサイズを固定します。
         //    端末やカメラの実解像度が違っても、出力される動画は必ずこのサイズになります。
         //
-        //    顔撮影用のため、スマホのような縦長 1080x1920 (フルHD縦, 9:16) を基準にしています。
-        //    ・PCのWebカメラ（横向き）で使う場合は、映像の左右がクロップされ縦長に切り出されます
-        //    ・より軽量にしたい場合は 720x1280 に変更可能です（値を小さくするほどファイルサイズも減少）。
-        const CAPTURE_WIDTH = 1080;
-        const CAPTURE_HEIGHT = 1920;
+        //    重要：この値は「拡大(アップスケール)が発生しにくい、余裕を持った下限」に設定してください。
+        //    低解像度カメラの映像をこのサイズまで引き伸ばすと、実際には存在しない情報を補間で
+        //    埋めることになり、見かけ上のサイズは揃っても実効的な解像度（情報量）は端末ごとにバラつきます。
+        //    研究データとして条件を揃えるなら、使用予定の端末（特に一番古い/性能が低い機種）の
+        //    実カメラ解像度を事前に確認し、それを下回らない範囲でできるだけ低めに設定するのが安全です。
+        //
+        //    暫定的に 720x1280 (HD縦, 9:16) を初期値にしています。近年のスマホであれば
+        //    ほぼ確実にこれ以上のネイティブ解像度を持っているため、多くの場合「縮小」で済みます。
+        const CAPTURE_WIDTH = 720;
+        const CAPTURE_HEIGHT = 1280;
         const CAPTURE_FPS = 30;
+
+        // 撮影中に「実際はこのソース解像度未満で、アップスケールが発生している」ことを検知するための閾値。
+        // これを下回るソース解像度で録画が行われた場合、画面上に警告を出す。
+        let sourceIsBelowTarget = false;
 
         captureCanvas.width = CAPTURE_WIDTH;
         captureCanvas.height = CAPTURE_HEIGHT;
@@ -193,11 +208,14 @@
                 currentStream.getTracks().forEach(track => track.stop());
             }
 
-            // 取得したいカメラ映像の解像度は「基準サイズ以上」を希望する。
-            // ソース映像が基準サイズより低いと、キャンバスで引き伸ばされ画質が落ちるため、
-            // ideal はやや余裕を持たせて指定する（実機がこれを下回っても取得自体は成功する）。
-            const idealWidth = Math.max(CAPTURE_WIDTH, CAPTURE_HEIGHT);
-            const idealHeight = Math.min(CAPTURE_WIDTH, CAPTURE_HEIGHT);
+            // 取得したいカメラ映像の解像度は「目標の縦長サイズ」を希望する。
+            // ※以前のバージョンではここを横長 (Math.max/min) で要求していたため、
+            //   スマホでも横長の映像が返ってきてプレビューが横長になるバグがありました。
+            //   ideal はあくまで希望値なので、古いスマホで対応していなくても取得自体は成功し、
+            //   その場合は取得できた最大解像度が使われます（下のcanvas描画で自動的に
+            //   CAPTURE_WIDTH x CAPTURE_HEIGHT にリサイズされるため、出力サイズは常に統一されます）。
+            const idealWidth = CAPTURE_WIDTH;
+            const idealHeight = CAPTURE_HEIGHT;
 
             // 試す制約の候補（上から順に試し、失敗したら次を試す）
             // 1. facingMode指定あり（スマホの前面/背面切り替え用）
@@ -216,6 +234,11 @@
                         width: { ideal: idealWidth },
                         height: { ideal: idealHeight }
                     },
+                    audio: true
+                },
+                {
+                    // 解像度指定なし（上記が両方失敗する非常に古い/特殊な端末向けの最終フォールバック）
+                    video: true,
                     audio: true
                 }
             ];
@@ -250,7 +273,25 @@
 
             const track = currentStream.getVideoTracks()[0];
             const settings = track ? track.getSettings() : {};
-            log.textContent = `Camera ready (source ${settings.width || '?'}x${settings.height || '?'}). Output: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}`;
+            const srcW = settings.width || 0;
+            const srcH = settings.height || 0;
+
+            // このソース解像度をキャンバスのカバー方式クロップに当てはめた場合の拡大率を計算し、
+            // 1を超えていれば「実質的にアップスケールが発生している」と判定する。
+            let scaleFactor = 1;
+            if (srcW && srcH) {
+                const canvasRatio = CAPTURE_WIDTH / CAPTURE_HEIGHT;
+                const videoRatio = srcW / srcH;
+                scaleFactor = (videoRatio > canvasRatio)
+                    ? CAPTURE_HEIGHT / srcH
+                    : CAPTURE_WIDTH / srcW;
+            }
+            sourceIsBelowTarget = scaleFactor > 1.01;
+            resWarning.classList.toggle('hidden', !sourceIsBelowTarget);
+
+            log.textContent = sourceIsBelowTarget
+                ? `⚠ Camera source ${srcW}x${srcH} is below target ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} (upscaled ${scaleFactor.toFixed(2)}x)`
+                : `Camera ready (source ${srcW}x${srcH}). Output: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} (downscaled, no upscaling)`;
         }
 
         // カメラ映像を、指定サイズのキャンバスに「中央クロップでフルカバー」して毎フレーム描画する
@@ -370,7 +411,9 @@
             mediaRecorder.start();
             recordingStartTime = Date.now(); // 各セグメント開始時に時刻を記録
 
-            log.textContent = `Recording #${segmentIndex} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
+            log.textContent = sourceIsBelowTarget
+                ? `⚠ Recording #${segmentIndex} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
+                : `Recording #${segmentIndex} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
 
             setTimeout(() => {
                 if (isRecording && mediaRecorder.state === 'recording') {
