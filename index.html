@@ -80,6 +80,11 @@
         <span class="text-xs font-bold text-black">⚠ Source resolution below target — upscaled</span>
     </div>
 
+    <!-- カメラ種別（前面/背面）表示。左右定義の一貫性のため常に見えるようにする -->
+    <div id="camLabel" class="fixed top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full z-20 border border-white/10">
+        <span id="camLabelText" class="text-xs font-bold tracking-wide">FRONT camera</span>
+    </div>
+
     <!-- カメラ切り替え -->
     <button id="switchCamera" class="fixed top-6 right-6 p-4 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white z-20 active:scale-90 transition-transform">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -92,13 +97,13 @@
         <div class="max-w-md mx-auto space-y-6">
             <div class="flex gap-4">
                 <div class="flex-1 space-y-1">
-                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Angle</label>
+                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Position</label>
                     <div id="angleSelector" class="grid grid-cols-5 gap-1.5">
-                        <button type="button" data-angle="L2" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">L2</button>
-                        <button type="button" data-angle="L1" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">L1</button>
-                        <button type="button" data-angle="C"  class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">C</button>
-                        <button type="button" data-angle="R1" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">R1</button>
-                        <button type="button" data-angle="R2" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">R2</button>
+                        <button type="button" data-angle="pos0" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos0</button>
+                        <button type="button" data-angle="pos1" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos1</button>
+                        <button type="button" data-angle="pos2" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos2</button>
+                        <button type="button" data-angle="pos3" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos3</button>
+                        <button type="button" data-angle="pos4" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos4</button>
                     </div>
                 </div>
                 <div class="w-24 space-y-1">
@@ -139,10 +144,11 @@
         const timerDisplay = document.getElementById('timer');
         const recordingIndicator = document.getElementById('recordingIndicator');
         const resWarning = document.getElementById('resWarning');
+        const camLabelText = document.getElementById('camLabelText');
         const switchCameraBtn = document.getElementById('switchCamera');
         const uiOverlay = document.getElementById('ui-overlay');
 
-        let selectedAngle = 'C'; // デフォルトは正面 (Center)
+        let selectedAngle = 'pos2'; // デフォルトは中央付近
 
         function setSelectedAngle(angle) {
             selectedAngle = angle;
@@ -161,16 +167,21 @@
         // ▼ ここで「常にこのピクセルサイズで録画する」というサイズを固定します。
         //    端末やカメラの実解像度が違っても、出力される動画は必ずこのサイズになります。
         //
-        //    重要：この値は「拡大(アップスケール)が発生しにくい、余裕を持った下限」に設定してください。
-        //    低解像度カメラの映像をこのサイズまで引き伸ばすと、実際には存在しない情報を補間で
-        //    埋めることになり、見かけ上のサイズは揃っても実効的な解像度（情報量）は端末ごとにバラつきます。
-        //    研究データとして条件を揃えるなら、使用予定の端末（特に一番古い/性能が低い機種）の
-        //    実カメラ解像度を事前に確認し、それを下回らない範囲でできるだけ低めに設定するのが安全です。
+        //    [features.py を踏まえた解像度設計]
+        //    MediaPipe FaceMeshのランドマークは両目間距離でスケール正規化されるため、
+        //    絶対解像度そのものに特徴量が強く依存することはない。ボトルネックは
+        //    「顔がフレーム内で十分な大きさ・鮮明さで写っているか」であり、
+        //    MediaPipeの内部処理自体は顔クロップを192〜256px程度にリサイズして使うため、
+        //    そのレベルを大きく下回らなければ精度への影響は小さい。
         //
-        //    暫定的に 720x1280 (HD縦, 9:16) を初期値にしています。近年のスマホであれば
-        //    ほぼ確実にこれ以上のネイティブ解像度を持っているため、多くの場合「縮小」で済みます。
-        const CAPTURE_WIDTH = 720;
-        const CAPTURE_HEIGHT = 1280;
+        //    そのため、画質の下限を「精度に必要な最小値」ではなく「ほぼ全てのカメラが
+        //    ネイティブで到達できる下限」に置き、アップスケール(=存在しない情報の捏造)を
+        //    確実に避けることを優先する。多くのPC内蔵/外付けWebカメラの最低共通解像度である
+        //    VGA横長 (640x480) を基準に、縦長9:16でこれを下回らない 270x480 を初期値とする。
+        //    （640x480の横長カメラをカバー方式で縦長クロップした場合、高さ480pxがそのまま
+        //    使われるため、CAPTURE_HEIGHTを480以下にしておけばアップスケールが発生しない）
+        const CAPTURE_WIDTH = 270;
+        const CAPTURE_HEIGHT = 480;
         const CAPTURE_FPS = 30;
 
         // 撮影中に「実際はこのソース解像度未満で、アップスケールが発生している」ことを検知するための閾値。
@@ -263,8 +274,10 @@
 
             if (useFrontCamera) {
                 preview.classList.add('mirror');
+                camLabelText.textContent = "FRONT camera";
             } else {
                 preview.classList.remove('mirror');
+                camLabelText.textContent = "BACK camera";
             }
 
             // 実際のカメラ映像は固定サイズのキャンバスに描画し、
@@ -294,7 +307,14 @@
                 : `Camera ready (source ${srcW}x${srcH}). Output: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} (downscaled, no upscaling)`;
         }
 
-        // カメラ映像を、指定サイズのキャンバスに「中央クロップでフルカバー」して毎フレーム描画する
+        // カメラ映像を、指定サイズのキャンバスに「中央クロップでフルカバー」して毎フレーム描画する。
+        //
+        // 【研究データの左右一貫性のための最重要処理】
+        // features.py は左右の非対称性で噛む位置を判定するため、録画データの左右の向きは
+        // 全サンプルで厳密に一致していなければならない。
+        // プレビュー(video要素)には見やすさのため前面カメラ時にミラー(.mirror)をかけるが、
+        // それは【表示だけ】であり、ここでキャンバスに描画する映像には決してミラーを適用しない。
+        // → 前面/背面のどちらで撮っても、録画される映像は常に「カメラが捉えた実際の向き」で統一される。
         function drawFrameToCanvas() {
             const vw = preview.videoWidth;
             const vh = preview.videoHeight;
@@ -318,6 +338,7 @@
                     sy = (vh - sh) / 2;
                 }
 
+                // ミラーは一切かけずに描画（＝録画データは常に実際の向き）
                 canvasCtx.drawImage(preview, sx, sy, sw, sh, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
             }
 
@@ -338,12 +359,26 @@
         }
 
         switchCameraBtn.addEventListener('click', () => {
+            // 録画中のカメラ切替は、currentStreamの差し替えで録画が壊れる／
+            // 前面・背面が混在して左右定義がブレるため禁止する。
+            if (isRecording) {
+                log.textContent = "⚠ Cannot switch camera while recording. Press STOP first.";
+                return;
+            }
             useFrontCamera = !useFrontCamera;
             startCamera();
         });
 
         startBtn.addEventListener('click', async () => {
             if (!currentStream) return;
+
+            // interval値の検証（不正値だと録画ループのタイマーが壊れるため）
+            const intervalSec = parseInt(intervalInput.value, 10);
+            if (!Number.isFinite(intervalSec) || intervalSec < 1) {
+                log.textContent = "⚠ Interval must be an integer of 1 second or more.";
+                return;
+            }
+
             await requestWakeLock();
             isRecording = true;
             segmentIndex = 1;
@@ -351,6 +386,7 @@
             stopBtn.classList.remove('hidden');
             recordingIndicator.classList.remove('hidden');
             angleButtons.forEach(btn => btn.disabled = true);
+            intervalInput.disabled = true;
 
             uiOverlay.style.opacity = "0.4";
 
@@ -371,6 +407,7 @@
             stopBtn.classList.add('hidden');
             recordingIndicator.classList.add('hidden');
             angleButtons.forEach(btn => btn.disabled = false);
+            intervalInput.disabled = false;
             uiOverlay.style.opacity = "1";
             log.textContent = "Stopped.";
             timerDisplay.textContent = "00:00";
@@ -396,20 +433,38 @@
 
             mediaRecorder = new MediaRecorder(combinedStream, options);
 
+            const intervalMs = parseInt(intervalInput.value) * 1000;
+            let segmentStartMs = 0;
+            // このセグメントが「設定時間を満了して自動停止したか」を示すフラグ。
+            // 満了停止(setTimeoutが発火してstop)した場合のみ true になる。
+            // STOPボタンによる途中停止では false のままなので、そのセグメントは破棄される。
+            // ※ 時間の実測(Date.now差分)で判定すると、setTimeout→stop→onstopの実行遅延により
+            //   正常な満了セグメントの実測長が intervalMs をわずかに前後し、誤判定が起きる。
+            //   そのため「停止理由」で厳密に判定する。
+            let reachedFullDuration = false;
+
             mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) recordedChunks.push(e.data);
             };
 
             mediaRecorder.onstop = () => {
-                saveBlob();
+                const actualDurationMs = Date.now() - segmentStartMs;
+                if (reachedFullDuration) {
+                    // 設定時間を満了したセグメントのみ保存
+                    saveBlob();
+                } else {
+                    // 設定時間に満たずに停止したセグメント（STOPでの中断）は破棄
+                    recordedChunks = [];
+                    log.textContent = `Discarded incomplete segment (${(actualDurationMs/1000).toFixed(1)}s < ${(intervalMs/1000).toFixed(1)}s).`;
+                }
                 if (isRecording) {
                     startRecordingSegment();
                 }
             };
 
-            const intervalMs = parseInt(intervalInput.value) * 1000;
             mediaRecorder.start();
-            recordingStartTime = Date.now(); // 各セグメント開始時に時刻を記録
+            segmentStartMs = Date.now();
+            recordingStartTime = segmentStartMs; // 各セグメント開始時に時刻を記録
 
             log.textContent = sourceIsBelowTarget
                 ? `⚠ Recording #${segmentIndex} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
@@ -417,6 +472,7 @@
 
             setTimeout(() => {
                 if (isRecording && mediaRecorder.state === 'recording') {
+                    reachedFullDuration = true; // 満了による停止であることを記録
                     mediaRecorder.stop();
                 }
             }, intervalMs);
