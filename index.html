@@ -119,9 +119,9 @@
                     </div>
                 </div>
                 <div class="w-24 space-y-1">
-                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Interval</label>
+                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Start #</label>
                     <div class="relative">
-                        <input type="number" id="intervalInput" value="10" class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm text-center outline-none">
+                        <input type="number" id="startIndexInput" value="1" min="1" class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm text-center outline-none">
                     </div>
                 </div>
             </div>
@@ -151,7 +151,7 @@
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const angleButtons = document.querySelectorAll('.angle-btn');
-        const intervalInput = document.getElementById('intervalInput');
+        const startIndexInput = document.getElementById('startIndexInput');
         const log = document.getElementById('log');
         const timerDisplay = document.getElementById('timer');
         const recordingIndicator = document.getElementById('recordingIndicator');
@@ -195,6 +195,9 @@
         const CAPTURE_WIDTH = 360;
         const CAPTURE_HEIGHT = 640;
         const CAPTURE_FPS = 30;
+
+        // 各セグメントの録画秒数は10秒固定（研究プロトコルとして固定）。
+        const SEGMENT_SECONDS = 10;
 
         // 撮影中に「実際はこのソース解像度未満で、アップスケールが発生している」ことを検知するための閾値。
         // これを下回るソース解像度で録画が行われた場合、画面上に警告を出す。
@@ -384,21 +387,21 @@
         startBtn.addEventListener('click', async () => {
             if (!currentStream) return;
 
-            // interval値の検証（不正値だと録画ループのタイマーが壊れるため）
-            const intervalSec = parseInt(intervalInput.value, 10);
-            if (!Number.isFinite(intervalSec) || intervalSec < 1) {
-                log.textContent = "⚠ Interval must be an integer of 1 second or more.";
+            // 開始番号の検証（1以上の整数）。ここで指定した番号から連番でファイルが保存される。
+            const startIndex = parseInt(startIndexInput.value, 10);
+            if (!Number.isFinite(startIndex) || startIndex < 1) {
+                log.textContent = "⚠ Start # must be an integer of 1 or more.";
                 return;
             }
 
             await requestWakeLock();
             isRecording = true;
-            segmentIndex = 1;
+            segmentIndex = startIndex;
             startBtn.classList.add('hidden');
             stopBtn.classList.remove('hidden');
             recordingIndicator.classList.remove('hidden');
             angleButtons.forEach(btn => btn.disabled = true);
-            intervalInput.disabled = true;
+            startIndexInput.disabled = true;
 
             uiOverlay.style.opacity = "0.4";
 
@@ -419,7 +422,9 @@
             stopBtn.classList.add('hidden');
             recordingIndicator.classList.add('hidden');
             angleButtons.forEach(btn => btn.disabled = false);
-            intervalInput.disabled = false;
+            startIndexInput.disabled = false;
+            // 次回の続き撮影に備え、開始番号欄を「次に保存される番号」に自動更新しておく。
+            startIndexInput.value = segmentIndex;
             uiOverlay.style.opacity = "1";
             log.textContent = "Stopped.";
             timerDisplay.textContent = "00:00";
@@ -445,7 +450,7 @@
 
             mediaRecorder = new MediaRecorder(combinedStream, options);
 
-            const intervalMs = parseInt(intervalInput.value) * 1000;
+            const intervalMs = SEGMENT_SECONDS * 1000;
             let segmentStartMs = 0;
             // このセグメントが「設定時間を満了して自動停止したか」を示すフラグ。
             // 満了停止(setTimeoutが発火してstop)した場合のみ true になる。
