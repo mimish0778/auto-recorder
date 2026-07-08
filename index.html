@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Arsena's 10s Auto Recorder (Pro)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        .recording-dot {
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+        /* インカメラの時にプレビューを鏡のように反転 */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        /* 映像を全画面で表示 */
+        #preview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* アスペクト比を維持 */
+            z-index: 1;
+        }
+        /* コントロールパネルを半透明にして重ねる */
+        #ui-overlay {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            z-index: 10;
+            background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
+            padding: 40px 24px 40px 24px;
+            transition: transform 0.3s ease;
+        }
+        .ui-hidden {
+            transform: translateY(100%);
+        }
+        .angle-btn.active {
+            background-color: #dc2626;
+            border-color: #dc2626;
+            color: #fff;
+        }
+        .angle-btn:disabled {
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body class="font-sans text-white">
+
+    <!-- 映像プレビュー (アスペクト比維持) -->
+    <video id="preview" autoplay playsinline muted class="mirror"></video>
+
+    <!-- 撮影サイズを固定するための隠しキャンバス（画面には表示しない） -->
+    <canvas id="captureCanvas" style="position:fixed; top:-99999px; left:-99999px;"></canvas>
+
+    <!-- REC インジケーター -->
+    <div id="recordingIndicator" class="fixed top-6 left-6 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full z-20 hidden border border-white/10">
+        <div class="w-3 h-3 bg-red-600 rounded-full recording-dot"></div>
+        <span class="text-xs font-bold tracking-widest uppercase">Recording</span>
+        <span id="timer" class="text-sm font-mono ml-2">00:00</span>
+    </div>
+
+    <!-- カメラ切り替え -->
+    <button id="switchCamera" class="fixed top-6 right-6 p-4 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white z-20 active:scale-90 transition-transform">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+    </button>
+
+    <!-- 操作パネル -->
+    <div id="ui-overlay">
+        <div class="max-w-md mx-auto space-y-6">
+            <div class="flex gap-4">
+                <div class="flex-1 space-y-1">
+                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Angle</label>
+                    <div id="angleSelector" class="grid grid-cols-5 gap-1.5">
+                        <button type="button" data-angle="L2" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">L2</button>
+                        <button type="button" data-angle="L1" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">L1</button>
+                        <button type="button" data-angle="C"  class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">C</button>
+                        <button type="button" data-angle="R1" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">R1</button>
+                        <button type="button" data-angle="R2" class="angle-btn py-3 rounded-xl text-sm font-bold bg-white/10 border border-white/20 transition-all active:scale-95">R2</button>
+                    </div>
+                </div>
+                <div class="w-24 space-y-1">
+                    <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Interval</label>
+                    <div class="relative">
+                        <input type="number" id="intervalInput" value="10" class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm text-center outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button id="startBtn" class="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
+                    <div class="w-3 h-3 bg-white rounded-full"></div>
+                    <span>START AUTO REC</span>
+                </button>
+
+                <button id="stopBtn" class="hidden flex-1 py-4 bg-white text-black font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
+                    <div class="w-3 h-3 bg-black rounded-sm"></div>
+                    <span>STOP</span>
+                </button>
+            </div>
+
+            <div id="log" class="text-[10px] text-zinc-400 font-mono text-center opacity-60">
+                Ready to record. Background recording enabled.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const preview = document.getElementById('preview');
+        const captureCanvas = document.getElementById('captureCanvas');
+        const canvasCtx = captureCanvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const angleButtons = document.querySelectorAll('.angle-btn');
+        const intervalInput = document.getElementById('intervalInput');
+        const log = document.getElementById('log');
+        const timerDisplay = document.getElementById('timer');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+        const switchCameraBtn = document.getElementById('switchCamera');
+        const uiOverlay = document.getElementById('ui-overlay');
+
+        let selectedAngle = 'C'; // デフォルトは正面 (Center)
+
+        function setSelectedAngle(angle) {
+            selectedAngle = angle;
+            angleButtons.forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.angle === angle);
+            });
+        }
+
+        angleButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (isRecording) return; // 録画中はアングル変更不可（ファイル名がブレるのを防止）
+                setSelectedAngle(btn.dataset.angle);
+            });
+        });
+
+        // ▼ ここで「常にこのピクセルサイズで録画する」というサイズを固定します。
+        //    端末やカメラの実解像度が違っても、出力される動画は必ずこのサイズになります。
+        //
+        //    顔撮影用のため、スマホのような縦長 1080x1920 (フルHD縦, 9:16) を基準にしています。
+        //    ・PCのWebカメラ（横向き）で使う場合は、映像の左右がクロップされ縦長に切り出されます
+        //    ・より軽量にしたい場合は 720x1280 に変更可能です（値を小さくするほどファイルサイズも減少）。
+        const CAPTURE_WIDTH = 1080;
+        const CAPTURE_HEIGHT = 1920;
+        const CAPTURE_FPS = 30;
+
+        captureCanvas.width = CAPTURE_WIDTH;
+        captureCanvas.height = CAPTURE_HEIGHT;
+        setSelectedAngle(selectedAngle);
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let segmentIndex = 1;
+        let isRecording = false;
+        let currentStream;
+        let canvasStream; // 固定サイズキャンバスから生成する録画用ストリーム
+        let useFrontCamera = true;
+        let recordingStartTime;
+        let drawLoopRunning = false;
+
+        // バックグラウンドでの動作を維持するための Wake Lock
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {
+                console.error(`${err.name}, ${err.message}`);
+            }
+        }
+
+        async function startCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+
+            // 取得したいカメラ映像の解像度は「基準サイズ以上」を希望する。
+            // ソース映像が基準サイズより低いと、キャンバスで引き伸ばされ画質が落ちるため、
+            // ideal はやや余裕を持たせて指定する（実機がこれを下回っても取得自体は成功する）。
+            const idealWidth = Math.max(CAPTURE_WIDTH, CAPTURE_HEIGHT);
+            const idealHeight = Math.min(CAPTURE_WIDTH, CAPTURE_HEIGHT);
+
+            // 試す制約の候補（上から順に試し、失敗したら次を試す）
+            // 1. facingMode指定あり（スマホの前面/背面切り替え用）
+            // 2. facingMode指定なし（PCのWebカメラはfacingMode指定で失敗することがあるため）
+            const constraintCandidates = [
+                {
+                    video: {
+                        facingMode: useFrontCamera ? "user" : "environment",
+                        width: { ideal: idealWidth },
+                        height: { ideal: idealHeight }
+                    },
+                    audio: true
+                },
+                {
+                    video: {
+                        width: { ideal: idealWidth },
+                        height: { ideal: idealHeight }
+                    },
+                    audio: true
+                }
+            ];
+
+            let lastError = null;
+            for (const constraints of constraintCandidates) {
+                try {
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    lastError = null;
+                    break;
+                } catch (err) {
+                    lastError = err;
+                }
+            }
+
+            if (!currentStream) {
+                log.textContent = "Error: " + (lastError ? lastError.message : "camera unavailable");
+                return;
+            }
+
+            preview.srcObject = currentStream;
+
+            if (useFrontCamera) {
+                preview.classList.add('mirror');
+            } else {
+                preview.classList.remove('mirror');
+            }
+
+            // 実際のカメラ映像は固定サイズのキャンバスに描画し、
+            // 録画はそのキャンバスの映像ストリームから行う（＝端末に依らず出力サイズが一定）
+            startDrawLoop();
+
+            const track = currentStream.getVideoTracks()[0];
+            const settings = track ? track.getSettings() : {};
+            log.textContent = `Camera ready (source ${settings.width || '?'}x${settings.height || '?'}). Output: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}`;
+        }
+
+        // カメラ映像を、指定サイズのキャンバスに「中央クロップでフルカバー」して毎フレーム描画する
+        function drawFrameToCanvas() {
+            const vw = preview.videoWidth;
+            const vh = preview.videoHeight;
+
+            if (vw && vh) {
+                const canvasRatio = CAPTURE_WIDTH / CAPTURE_HEIGHT;
+                const videoRatio = vw / vh;
+
+                let sx, sy, sw, sh;
+                if (videoRatio > canvasRatio) {
+                    // 映像の方が横長 → 左右をクロップ
+                    sh = vh;
+                    sw = vh * canvasRatio;
+                    sx = (vw - sw) / 2;
+                    sy = 0;
+                } else {
+                    // 映像の方が縦長 → 上下をクロップ
+                    sw = vw;
+                    sh = vw / canvasRatio;
+                    sx = 0;
+                    sy = (vh - sh) / 2;
+                }
+
+                canvasCtx.drawImage(preview, sx, sy, sw, sh, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+            }
+
+            if (drawLoopRunning) {
+                requestAnimationFrame(drawFrameToCanvas);
+            }
+        }
+
+        function startDrawLoop() {
+            if (!canvasStream) {
+                // captureStream は一度だけ作成し、使い回す
+                canvasStream = captureCanvas.captureStream(CAPTURE_FPS);
+            }
+            if (!drawLoopRunning) {
+                drawLoopRunning = true;
+                requestAnimationFrame(drawFrameToCanvas);
+            }
+        }
+
+        switchCameraBtn.addEventListener('click', () => {
+            useFrontCamera = !useFrontCamera;
+            startCamera();
+        });
+
+        startBtn.addEventListener('click', async () => {
+            if (!currentStream) return;
+            await requestWakeLock();
+            isRecording = true;
+            segmentIndex = 1;
+            startBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+            recordingIndicator.classList.remove('hidden');
+            angleButtons.forEach(btn => btn.disabled = true);
+
+            uiOverlay.style.opacity = "0.4";
+
+            startRecordingSegment();
+            updateTimer(); // タイマーの更新を開始
+        });
+
+        stopBtn.addEventListener('click', () => {
+            isRecording = false;
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+            startBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
+            recordingIndicator.classList.add('hidden');
+            angleButtons.forEach(btn => btn.disabled = false);
+            uiOverlay.style.opacity = "1";
+            log.textContent = "Stopped.";
+            timerDisplay.textContent = "00:00";
+        });
+
+        function startRecordingSegment() {
+            if (!isRecording) return;
+
+            recordedChunks = [];
+            const mimeTypes = [
+                'video/mp4;codecs=avc1',
+                'video/webm;codecs=vp9',
+                'video/webm'
+            ];
+            const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+            const options = { mimeType, videoBitsPerSecond: 8000000 };
+
+            // 映像は「固定サイズキャンバス」のトラック、音声はマイクのトラックを合成して録画する
+            const combinedStream = new MediaStream([
+                ...canvasStream.getVideoTracks(),
+                ...currentStream.getAudioTracks()
+            ]);
+
+            mediaRecorder = new MediaRecorder(combinedStream, options);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                saveBlob();
+                if (isRecording) {
+                    startRecordingSegment();
+                }
+            };
+
+            const intervalMs = parseInt(intervalInput.value) * 1000;
+            mediaRecorder.start();
+            recordingStartTime = Date.now(); // 各セグメント開始時に時刻を記録
+
+            log.textContent = `Recording #${segmentIndex} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
+
+            setTimeout(() => {
+                if (isRecording && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }, intervalMs);
+        }
+
+        // タイマー更新関数
+        function updateTimer() {
+            if (!isRecording) return;
+
+            if (recordingStartTime) {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const seconds = String(elapsed % 60).padStart(2, '0');
+                const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                timerDisplay.textContent = `${minutes}:${seconds}`;
+            }
+
+            requestAnimationFrame(updateTimer);
+        }
+
+        function saveBlob() {
+            if (recordedChunks.length === 0) return;
+
+            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const baseName = selectedAngle;
+            let ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
+
+            a.href = url;
+            a.download = `${baseName}_${String(segmentIndex).padStart(3, '0')}.${ext}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            segmentIndex++;
+            setTimeout(() => URL.revokeObjectURL(url), 100);
+        }
+
+        startCamera();
+
+        preview.addEventListener('click', () => {
+            uiOverlay.style.opacity = uiOverlay.style.opacity === "1" ? "0.4" : "1";
+        });
+    </script>
+</body>
+</html>
