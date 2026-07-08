@@ -56,11 +56,21 @@
             width: 100%;
             z-index: 10;
             background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
-            padding: 40px 20px 32px 20px;
+            padding: 40px 0 32px 0;
             transition: transform 0.3s ease;
         }
         .ui-hidden {
             transform: translateY(100%);
+        }
+        /* 操作パネルの内容幅を、プレビュー枠(9:16)と同じ幅に揃える。
+           これによりボタン群がプレビューの左右端と一致し、見た目が整う。
+           プレビューが画面より狭い場合でも、はみ出さず中央に収まる。 */
+        #ui-inner {
+            width: min(100vw, calc(100vh * 9 / 16));
+            max-width: 100%;
+            padding-left: 16px;
+            padding-right: 16px;
+            box-sizing: border-box;
         }
         .angle-btn.active {
             background-color: #dc2626;
@@ -106,7 +116,7 @@
 
     <!-- 操作パネル -->
     <div id="ui-overlay">
-        <div class="max-w-md mx-auto space-y-4">
+        <div id="ui-inner" class="mx-auto space-y-4">
             <div class="flex gap-3 items-end">
                 <!-- Position: 5ボタンを横いっぱいに均等配置 -->
                 <div class="flex-1 min-w-0 space-y-1.5">
