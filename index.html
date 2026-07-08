@@ -56,7 +56,7 @@
             width: 100%;
             z-index: 10;
             background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
-            padding: 40px 24px 40px 24px;
+            padding: 40px 20px 32px 20px;
             transition: transform 0.3s ease;
         }
         .ui-hidden {
@@ -106,23 +106,23 @@
 
     <!-- 操作パネル -->
     <div id="ui-overlay">
-        <div class="max-w-md mx-auto space-y-6">
-            <div class="flex gap-4">
-                <div class="flex-1 space-y-1">
+        <div class="max-w-md mx-auto space-y-4">
+            <div class="flex gap-3 items-end">
+                <!-- Position: 5ボタンを横いっぱいに均等配置 -->
+                <div class="flex-1 min-w-0 space-y-1.5">
                     <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Position</label>
-                    <div id="angleSelector" class="grid grid-cols-5 gap-1.5">
-                        <button type="button" data-angle="pos0" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos0</button>
-                        <button type="button" data-angle="pos1" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos1</button>
-                        <button type="button" data-angle="pos2" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos2</button>
-                        <button type="button" data-angle="pos3" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos3</button>
-                        <button type="button" data-angle="pos4" class="angle-btn py-3 rounded-xl text-xs font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos4</button>
+                    <div id="angleSelector" class="grid grid-cols-5 gap-1">
+                        <button type="button" data-angle="pos0" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos0</button>
+                        <button type="button" data-angle="pos1" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos1</button>
+                        <button type="button" data-angle="pos2" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos2</button>
+                        <button type="button" data-angle="pos3" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos3</button>
+                        <button type="button" data-angle="pos4" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos4</button>
                     </div>
                 </div>
-                <div class="w-24 space-y-1">
+                <!-- Start #: 番号入力（手動設定） -->
+                <div class="w-16 shrink-0 space-y-1.5">
                     <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Start #</label>
-                    <div class="relative">
-                        <input type="number" id="startIndexInput" value="1" min="1" class="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-sm text-center outline-none">
-                    </div>
+                    <input type="number" id="startIndexInput" value="1" min="1" class="w-full bg-white/10 border border-white/20 rounded-lg px-2 py-2.5 text-sm text-center outline-none">
                 </div>
             </div>
 
@@ -423,8 +423,6 @@
             recordingIndicator.classList.add('hidden');
             angleButtons.forEach(btn => btn.disabled = false);
             startIndexInput.disabled = false;
-            // 次回の続き撮影に備え、開始番号欄を「次に保存される番号」に自動更新しておく。
-            startIndexInput.value = segmentIndex;
             uiOverlay.style.opacity = "1";
             log.textContent = "Stopped.";
             timerDisplay.textContent = "00:00";
