@@ -22,9 +22,8 @@
             50% { opacity: 0.3; }
             100% { opacity: 1; }
         }
-        /* インカメラの時にプレビューを鏡のように反転（実際の定義は #preview.mirror にある。
-           録画データには反映されない、表示のみのミラー） */
-        /* 映像を全画面で表示 */
+        /* プレビュー映像。録画canvasと同じ9:16枠にcoverで表示する（下の #preview 定義参照）。
+           前面カメラ時のミラーは表示のみで、録画データには反映されない（#preview.mirror）。 */
         #preview {
             position: fixed;
             /* 録画canvasと同じアスペクト比(CAPTURE_WIDTH:CAPTURE_HEIGHT = 360:640 = 9:16)の枠に
@@ -226,6 +225,7 @@
         let useFrontCamera = true;
         let recordingStartTime;
         let drawLoopRunning = false;
+        let segmentTimeoutId = null; // 各セグメントの自動停止タイマーID（宙に浮くのを防ぐため保持）
 
         // バックグラウンドでの動作を維持するための Wake Lock
         let wakeLock = null;
@@ -396,6 +396,7 @@
 
         startBtn.addEventListener('click', async () => {
             if (!currentStream) return;
+            if (isRecording) return; // 二重START防止
 
             // 開始番号の検証（1以上の整数）。ここで指定した番号から連番でファイルが保存される。
             const startIndex = parseInt(startIndexInput.value, 10);
@@ -403,6 +404,22 @@
                 log.textContent = "⚠ Start # must be an integer of 1 or more.";
                 return;
             }
+
+            // --- 前回録画の残存状態を明示的に後始末（STOP後に再開できなくなる不具合の防止） ---
+            if (segmentTimeoutId !== null) {
+                clearTimeout(segmentTimeoutId);
+                segmentTimeoutId = null;
+            }
+            if (mediaRecorder) {
+                // 前回のmediaRecorderのイベントを解除し、中途半端に残った状態を断ち切る
+                mediaRecorder.ondataavailable = null;
+                mediaRecorder.onstop = null;
+                if (mediaRecorder.state !== 'inactive') {
+                    try { mediaRecorder.stop(); } catch (e) {}
+                }
+                mediaRecorder = null;
+            }
+            recordedChunks = [];
 
             await requestWakeLock();
             isRecording = true;
@@ -416,11 +433,16 @@
             uiOverlay.style.opacity = "0.4";
 
             startRecordingSegment();
-            updateTimer(); // タイマーの更新を開始
+            startTimerLoop(); // タイマーの更新を開始（二重起動防止つき）
         });
 
         stopBtn.addEventListener('click', () => {
             isRecording = false;
+            // 進行中セグメントの自動停止タイマーをクリア（残ると再START時に新録画を誤って止める）
+            if (segmentTimeoutId !== null) {
+                clearTimeout(segmentTimeoutId);
+                segmentTimeoutId = null;
+            }
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
             }
@@ -495,7 +517,7 @@
                 ? `⚠ Recording #${segmentIndex} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
                 : `Recording #${segmentIndex} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
 
-            setTimeout(() => {
+            segmentTimeoutId = setTimeout(() => {
                 if (isRecording && mediaRecorder.state === 'recording') {
                     reachedFullDuration = true; // 満了による停止であることを記録
                     mediaRecorder.stop();
@@ -504,8 +526,9 @@
         }
 
         // タイマー更新関数
+        let timerLoopRunning = false;
         function updateTimer() {
-            if (!isRecording) return;
+            if (!isRecording) { timerLoopRunning = false; return; }
 
             if (recordingStartTime) {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
@@ -516,15 +539,22 @@
 
             requestAnimationFrame(updateTimer);
         }
+        function startTimerLoop() {
+            if (!timerLoopRunning) {
+                timerLoopRunning = true;
+                requestAnimationFrame(updateTimer);
+            }
+        }
 
         function saveBlob() {
             if (recordedChunks.length === 0) return;
 
-            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+            const blobType = mediaRecorder.mimeType;
+            const blob = new Blob(recordedChunks, { type: blobType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             const baseName = selectedAngle;
-            let ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
+            const ext = blobType.includes('mp4') ? 'mp4' : 'webm';
 
             a.href = url;
             a.download = `${baseName}_${String(segmentIndex).padStart(3, '0')}.${ext}`;
