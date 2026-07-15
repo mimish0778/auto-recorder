@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arsena's 10s Auto Recorder (Pro)</title>
+    <title>Arsena's 10s Take Recorder (Pro)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body, html {
@@ -113,6 +113,11 @@
         </svg>
     </button>
 
+    <!-- カウントダウン表示（START押下後、録画開始前に3・2・1を表示） -->
+    <div id="countdownOverlay" class="fixed inset-0 z-30" style="display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.5);">
+        <span id="countdownNumber" class="text-white font-black" style="font-size: 30vh; line-height: 1;">3</span>
+    </div>
+
     <!-- 操作パネル -->
     <div id="ui-overlay">
         <div id="ui-inner" class="mx-auto space-y-4">
@@ -138,7 +143,7 @@
             <div class="flex gap-3">
                 <button id="startBtn" class="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
                     <div class="w-3 h-3 bg-white rounded-full"></div>
-                    <span>START AUTO REC</span>
+                    <span>START (3-2-1, 10s)</span>
                 </button>
 
                 <button id="stopBtn" class="hidden flex-1 py-4 bg-white text-black font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
@@ -168,6 +173,8 @@
         const camLabelText = document.getElementById('camLabelText');
         const switchCameraBtn = document.getElementById('switchCamera');
         const uiOverlay = document.getElementById('ui-overlay');
+        const countdownOverlay = document.getElementById('countdownOverlay');
+        const countdownNumber = document.getElementById('countdownNumber');
 
         let selectedAngle = 'pos2'; // デフォルトは中央付近
 
@@ -180,7 +187,7 @@
 
         angleButtons.forEach(btn => {
             btn.addEventListener('click', () => {
-                if (isRecording) return; // 録画中はアングル変更不可（ファイル名がブレるのを防止）
+                if (isRecording || isCountingDown) return; // 録画中/カウントダウン中は変更不可
                 setSelectedAngle(btn.dataset.angle);
             });
         });
@@ -205,8 +212,8 @@
         const CAPTURE_HEIGHT = 640;
         const CAPTURE_FPS = 30;
 
-        // 各セグメントの録画秒数は10秒固定（研究プロトコルとして固定）。
-        const SEGMENT_SECONDS = 10;
+        // 各テイクの録画秒数は10秒固定（研究プロトコルとして固定）。
+        const TAKE_SECONDS = 10;
 
         // 撮影中に「実際はこのソース解像度未満で、アップスケールが発生している」ことを検知するための閾値。
         // これを下回るソース解像度で録画が行われた場合、画面上に警告を出す。
@@ -218,14 +225,16 @@
 
         let mediaRecorder;
         let recordedChunks = [];
-        let segmentIndex = 1;
+        let takeNumber = 1;
         let isRecording = false;
         let currentStream;
         let canvasStream; // 固定サイズキャンバスから生成する録画用ストリーム
         let useFrontCamera = true;
         let recordingStartTime;
         let drawLoopRunning = false;
-        let segmentTimeoutId = null; // 各セグメントの自動停止タイマーID（宙に浮くのを防ぐため保持）
+        let takeTimeoutId = null; // 各テイクの自動停止タイマーID（宙に浮くのを防ぐため保持）
+        let countdownTimeoutIds = []; // カウントダウン中の setTimeout ID群（STOPで中断できるよう保持）
+        let isCountingDown = false;
 
         // バックグラウンドでの動作を維持するための Wake Lock
         let wakeLock = null;
@@ -384,21 +393,45 @@
         }
 
         switchCameraBtn.addEventListener('click', () => {
-            // 録画中のカメラ切替は、currentStreamの差し替えで録画が壊れる／
+            // 録画中・カウントダウン中のカメラ切替は、currentStreamの差し替えで録画が壊れる／
             // 前面・背面が混在して左右定義がブレるため禁止する。
-            if (isRecording) {
-                log.textContent = "⚠ Cannot switch camera while recording. Press STOP first.";
+            if (isRecording || isCountingDown) {
+                log.textContent = "⚠ Cannot switch camera now. Press STOP first.";
                 return;
             }
             useFrontCamera = !useFrontCamera;
             startCamera();
         });
 
+        // 待機状態(START前の見た目)に戻す共通処理。
+        // 手動STOP・自動完了(10秒満了)・中断のいずれからも、必ずここを通って同じ状態に戻す。
+        function resetToIdleUI() {
+            isRecording = false;
+            isCountingDown = false;
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+            startBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
+            recordingIndicator.classList.add('hidden');
+            countdownOverlay.style.display = 'none';
+            angleButtons.forEach(btn => btn.disabled = false);
+            startIndexInput.disabled = false;
+            uiOverlay.style.opacity = "1";
+            timerDisplay.textContent = "00:00";
+        }
+
+        function cancelCountdown() {
+            countdownTimeoutIds.forEach(id => clearTimeout(id));
+            countdownTimeoutIds = [];
+        }
+
         startBtn.addEventListener('click', async () => {
             if (!currentStream) return;
-            if (isRecording) return; // 二重START防止
+            if (isRecording || isCountingDown) return; // 二重START防止
 
-            // 開始番号の検証（1以上の整数）。ここで指定した番号から連番でファイルが保存される。
+            // 開始番号の検証（1以上の整数）。この番号のまま(増加せず)ファイル名に使われる。
             const startIndex = parseInt(startIndexInput.value, 10);
             if (!Number.isFinite(startIndex) || startIndex < 1) {
                 log.textContent = "⚠ Start # must be an integer of 1 or more.";
@@ -406,12 +439,11 @@
             }
 
             // --- 前回録画の残存状態を明示的に後始末（STOP後に再開できなくなる不具合の防止） ---
-            if (segmentTimeoutId !== null) {
-                clearTimeout(segmentTimeoutId);
-                segmentTimeoutId = null;
+            if (takeTimeoutId !== null) {
+                clearTimeout(takeTimeoutId);
+                takeTimeoutId = null;
             }
             if (mediaRecorder) {
-                // 前回のmediaRecorderのイベントを解除し、中途半端に残った状態を断ち切る
                 mediaRecorder.ondataavailable = null;
                 mediaRecorder.onstop = null;
                 if (mediaRecorder.state !== 'inactive') {
@@ -420,47 +452,61 @@
                 mediaRecorder = null;
             }
             recordedChunks = [];
+            takeNumber = startIndex;
 
-            await requestWakeLock();
-            isRecording = true;
-            segmentIndex = startIndex;
+            // カウントダウン中も、ポジション・番号・カメラ切替は録画中と同様にロックする
+            // （カウントダウン中に条件が変わってしまうのを防ぐため）。
             startBtn.classList.add('hidden');
             stopBtn.classList.remove('hidden');
-            recordingIndicator.classList.remove('hidden');
             angleButtons.forEach(btn => btn.disabled = true);
             startIndexInput.disabled = true;
-
             uiOverlay.style.opacity = "0.4";
 
-            startRecordingSegment();
-            startTimerLoop(); // タイマーの更新を開始（二重起動防止つき）
+            isCountingDown = true;
+            countdownOverlay.style.display = 'flex';
+
+            const counts = [3, 2, 1];
+            counts.forEach((n, i) => {
+                const id = setTimeout(() => {
+                    countdownNumber.textContent = String(n);
+                }, i * 1000);
+                countdownTimeoutIds.push(id);
+            });
+            const goId = setTimeout(async () => {
+                countdownOverlay.style.display = 'none';
+                isCountingDown = false;
+                countdownTimeoutIds = [];
+
+                await requestWakeLock();
+                isRecording = true;
+                recordingIndicator.classList.remove('hidden');
+                startTake();
+                startTimerLoop(); // タイマーの更新を開始（二重起動防止つき）
+            }, counts.length * 1000);
+            countdownTimeoutIds.push(goId);
         });
 
         stopBtn.addEventListener('click', () => {
-            isRecording = false;
-            // 進行中セグメントの自動停止タイマーをクリア（残ると再START時に新録画を誤って止める）
-            if (segmentTimeoutId !== null) {
-                clearTimeout(segmentTimeoutId);
-                segmentTimeoutId = null;
+            // カウントダウン中の中断
+            if (isCountingDown) {
+                cancelCountdown();
+                resetToIdleUI();
+                log.textContent = "Countdown canceled.";
+                return;
+            }
+            // 録画中の中断（満了前なので破棄される。reachedFullDurationフラグにより判定）
+            if (takeTimeoutId !== null) {
+                clearTimeout(takeTimeoutId);
+                takeTimeoutId = null;
             }
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
             }
-            if (wakeLock) {
-                wakeLock.release();
-                wakeLock = null;
-            }
-            startBtn.classList.remove('hidden');
-            stopBtn.classList.add('hidden');
-            recordingIndicator.classList.add('hidden');
-            angleButtons.forEach(btn => btn.disabled = false);
-            startIndexInput.disabled = false;
-            uiOverlay.style.opacity = "1";
+            resetToIdleUI();
             log.textContent = "Stopped.";
-            timerDisplay.textContent = "00:00";
         });
 
-        function startRecordingSegment() {
+        function startTake() {
             if (!isRecording) return;
 
             recordedChunks = [];
@@ -480,13 +526,13 @@
 
             mediaRecorder = new MediaRecorder(combinedStream, options);
 
-            const intervalMs = SEGMENT_SECONDS * 1000;
-            let segmentStartMs = 0;
-            // このセグメントが「設定時間を満了して自動停止したか」を示すフラグ。
+            const intervalMs = TAKE_SECONDS * 1000;
+            let takeStartMs = 0;
+            // このテイクが「設定時間を満了して自動停止したか」を示すフラグ。
             // 満了停止(setTimeoutが発火してstop)した場合のみ true になる。
-            // STOPボタンによる途中停止では false のままなので、そのセグメントは破棄される。
+            // STOPボタンによる途中停止では false のままなので、そのテイクは破棄される。
             // ※ 時間の実測(Date.now差分)で判定すると、setTimeout→stop→onstopの実行遅延により
-            //   正常な満了セグメントの実測長が intervalMs をわずかに前後し、誤判定が起きる。
+            //   正常な満了テイクの実測長が intervalMs をわずかに前後し、誤判定が起きる。
             //   そのため「停止理由」で厳密に判定する。
             let reachedFullDuration = false;
 
@@ -495,29 +541,30 @@
             };
 
             mediaRecorder.onstop = () => {
-                const actualDurationMs = Date.now() - segmentStartMs;
+                const actualDurationMs = Date.now() - takeStartMs;
                 if (reachedFullDuration) {
-                    // 設定時間を満了したセグメントのみ保存
+                    // 設定時間を満了したテイクのみ保存
                     saveBlob();
+                    log.textContent = `Saved ${selectedAngle}_${String(takeNumber).padStart(3,'0')}.`;
                 } else {
-                    // 設定時間に満たずに停止したセグメント（STOPでの中断）は破棄
+                    // 設定時間に満たずに停止したテイク（STOPでの中断）は破棄
                     recordedChunks = [];
-                    log.textContent = `Discarded incomplete segment (${(actualDurationMs/1000).toFixed(1)}s < ${(intervalMs/1000).toFixed(1)}s).`;
+                    log.textContent = `Discarded incomplete take (${(actualDurationMs/1000).toFixed(1)}s < ${(intervalMs/1000).toFixed(1)}s).`;
                 }
-                if (isRecording) {
-                    startRecordingSegment();
-                }
+                // 1テイク=1回の完結した録画のため、満了・中断のいずれでもここでidle状態に戻す
+                // （以前のような「次のテイクへ自動で続ける」ループは行わない）。
+                resetToIdleUI();
             };
 
             mediaRecorder.start();
-            segmentStartMs = Date.now();
-            recordingStartTime = segmentStartMs; // 各セグメント開始時に時刻を記録
+            takeStartMs = Date.now();
+            recordingStartTime = takeStartMs; // 各テイク開始時に時刻を記録
 
             log.textContent = sourceIsBelowTarget
-                ? `⚠ Recording #${segmentIndex} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
-                : `Recording #${segmentIndex} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
+                ? `⚠ Recording #${takeNumber} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
+                : `Recording #${takeNumber} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
 
-            segmentTimeoutId = setTimeout(() => {
+            takeTimeoutId = setTimeout(() => {
                 if (isRecording && mediaRecorder.state === 'recording') {
                     reachedFullDuration = true; // 満了による停止であることを記録
                     mediaRecorder.stop();
@@ -525,16 +572,15 @@
             }, intervalMs);
         }
 
-        // タイマー更新関数
+        // タイマー更新関数（1テイクは最大10秒固定のため、分の繰り上がりは発生しない。秒数のみ表示）
         let timerLoopRunning = false;
         function updateTimer() {
             if (!isRecording) { timerLoopRunning = false; return; }
 
             if (recordingStartTime) {
                 const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-                const seconds = String(elapsed % 60).padStart(2, '0');
-                const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
-                timerDisplay.textContent = `${minutes}:${seconds}`;
+                const seconds = String(elapsed).padStart(2, '0');
+                timerDisplay.textContent = `00:${seconds}`;
             }
 
             requestAnimationFrame(updateTimer);
@@ -557,12 +603,13 @@
             const ext = blobType.includes('mp4') ? 'mp4' : 'webm';
 
             a.href = url;
-            a.download = `${baseName}_${String(segmentIndex).padStart(3, '0')}.${ext}`;
+            a.download = `${baseName}_${String(takeNumber).padStart(3, '0')}.${ext}`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
 
-            segmentIndex++;
+            // 番号は自動で増やさない。同じ番号のまま何度でも撮り直せる仕様。
+            // 次の番号に進みたい場合はユーザーがStart #欄を手動で書き換える。
             setTimeout(() => URL.revokeObjectURL(url), 100);
         }
 
