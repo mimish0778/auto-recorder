@@ -3,126 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arsena's 10s Take Recorder (Pro)</title>
+    <title>Arsena's 10s Take Recorder (Research v2)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-        }
-        .recording-dot {
-            animation: pulse 1s infinite;
-        }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.3; }
-            100% { opacity: 1; }
-        }
-        /* プレビュー映像。録画canvasと同じ9:16枠にcoverで表示する（下の #preview 定義参照）。
-           前面カメラ時のミラーは表示のみで、録画データには反映されない（#preview.mirror）。 */
+        body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+        .recording-dot { animation: pulse 1s infinite; }
+        @keyframes pulse { 0%{opacity:1;} 50%{opacity:0.3;} 100%{opacity:1;} }
+
+        /* プレビュー映像。録画canvasと同じ9:16枠にcoverで表示する。 */
         #preview {
             position: fixed;
-            /* 録画canvasと同じアスペクト比(CAPTURE_WIDTH:CAPTURE_HEIGHT = 360:640 = 9:16)の枠に
-               プレビューを収める。画面いっぱい(=端末のアスペクト比)に広げてしまうと、
-               canvasのアスペクト比と食い違い、cover方式でも「見えている範囲」と
-               「録画される範囲」が厳密には一致しなくなるため。
-               縦画面・横画面のどちらでも9:16を保ったまま画面内に収まる最大サイズにするため、
-               vw/vh単位とmin()を使って幅・高さを算出する。
-               ・幅は「画面幅」と「画面高さ×(9/16)」の小さい方
-               ・高さはその幅×(16/9) */
             width: min(100vw, calc(100vh * 9 / 16));
             height: calc(min(100vw, calc(100vh * 9 / 16)) * 16 / 9);
-            top: 50%;
-            left: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             object-fit: cover;
             z-index: 1;
             background: #000;
         }
-        /* 前面カメラ時のミラーは transform に追記する必要があるため、専用クラスで上書き */
-        #preview.mirror {
-            transform: translate(-50%, -50%) scaleX(-1);
-        }
-        /* コントロールパネルを半透明にして重ねる */
-        #ui-overlay {
+        #preview.mirror { transform: translate(-50%, -50%) scaleX(-1); }
+
+        /* 顔占有率を全被験者で揃えるためのガイド枠。プレビュー枠(9:16)と厳密に一致させる。
+           表示のみ・録画には一切写り込まない(video/canvasとは別レイヤー、pointer-events無効)。 */
+        #faceGuide {
             position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            z-index: 10;
+            width: min(100vw, calc(100vh * 9 / 16));
+            height: calc(min(100vw, calc(100vh * 9 / 16)) * 16 / 9);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+            pointer-events: none;
+        }
+        #faceGuide.hidden-guide { display: none; }
+
+        #ui-overlay {
+            position: fixed; bottom: 0; left: 0; width: 100%; z-index: 10;
             background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 70%, transparent 100%);
             padding: 40px 0 32px 0;
             transition: transform 0.3s ease;
         }
-        .ui-hidden {
-            transform: translateY(100%);
-        }
-        /* 操作パネルの内容幅を、プレビュー枠(9:16)と同じ幅に揃える。
-           これによりボタン群がプレビューの左右端と一致し、見た目が整う。
-           プレビューが画面より狭い場合でも、はみ出さず中央に収まる。 */
         #ui-inner {
             width: min(100vw, calc(100vh * 9 / 16));
             max-width: 100%;
-            padding-left: 16px;
-            padding-right: 16px;
+            padding-left: 16px; padding-right: 16px;
             box-sizing: border-box;
         }
-        .angle-btn.active {
-            background-color: #dc2626;
-            border-color: #dc2626;
-            color: #fff;
-        }
-        .angle-btn:disabled {
-            opacity: 0.4;
-        }
+        .angle-btn.active { background:#dc2626; border-color:#dc2626; color:#fff; }
+        .angle-btn:disabled { opacity:0.4; }
+        .toggle-btn.active { background:#16a34a; border-color:#16a34a; color:#fff; }
+        .toggle-btn:disabled { opacity:0.4; }
     </style>
 </head>
 <body class="font-sans text-white">
 
-    <!-- 映像プレビュー (アスペクト比維持) -->
     <video id="preview" autoplay playsinline muted class="mirror"></video>
 
-    <!-- 撮影サイズを固定するための隠しキャンバス（画面には表示しない） -->
+    <!-- 顔占有率ガイド(表示のみ・録画非対象) -->
+    <svg id="faceGuide" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="180" cy="250" rx="95" ry="150" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2" stroke-dasharray="10 8"/>
+        <text x="180" y="250" fill="rgba(255,255,255,0.6)" font-size="14" text-anchor="middle" font-family="monospace">fit face here</text>
+    </svg>
+
     <canvas id="captureCanvas" style="position:fixed; top:-99999px; left:-99999px;"></canvas>
 
-    <!-- REC インジケーター -->
     <div id="recordingIndicator" class="fixed top-6 left-6 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full z-20 hidden border border-white/10">
         <div class="w-3 h-3 bg-red-600 rounded-full recording-dot"></div>
         <span class="text-xs font-bold tracking-widest uppercase">Recording</span>
-        <span id="timer" class="text-sm font-mono ml-2">00:00</span>
+        <span id="timer" class="text-sm font-mono ml-2">0/300</span>
     </div>
 
-    <!-- 解像度不足（アップスケール発生中）の警告バッジ -->
     <div id="resWarning" class="fixed top-20 left-6 flex items-center gap-2 bg-amber-500/90 backdrop-blur-md px-4 py-2 rounded-full z-20 hidden">
         <span class="text-xs font-bold text-black">⚠ Source resolution below target — upscaled</span>
     </div>
 
-    <!-- カメラ種別（前面/背面）表示。左右定義の一貫性のため常に見えるようにする -->
+    <div id="modeWarning" class="fixed top-32 left-6 flex items-center gap-2 bg-amber-500/90 backdrop-blur-md px-4 py-2 rounded-full z-20 hidden">
+        <span class="text-xs font-bold text-black">⚠ Frame-lock unsupported — TIME-BASED (variable frame count!)</span>
+    </div>
+
     <div id="camLabel" class="fixed top-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full z-20 border border-white/10">
         <span id="camLabelText" class="text-xs font-bold tracking-wide">FRONT camera</span>
     </div>
 
-    <!-- カメラ切り替え -->
     <button id="switchCamera" class="fixed top-6 right-6 p-4 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white z-20 active:scale-90 transition-transform">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
         </svg>
     </button>
 
-    <!-- カウントダウン表示（START押下後、録画開始前に3・2・1を表示） -->
     <div id="countdownOverlay" class="fixed inset-0 z-30" style="display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.5);">
         <span id="countdownNumber" class="text-white font-black" style="font-size: 30vh; line-height: 1;">3</span>
     </div>
 
-    <!-- 操作パネル -->
     <div id="ui-overlay">
         <div id="ui-inner" class="mx-auto space-y-4">
             <div class="flex gap-3 items-end">
-                <!-- Position: 5ボタンを横いっぱいに均等配置 -->
                 <div class="flex-1 min-w-0 space-y-1.5">
                     <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Position</label>
                     <div id="angleSelector" class="grid grid-cols-5 gap-1">
@@ -133,19 +107,22 @@
                         <button type="button" data-angle="pos4" class="angle-btn py-2.5 px-0 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">pos4</button>
                     </div>
                 </div>
-                <!-- Start #: 番号入力（手動設定） -->
                 <div class="w-16 shrink-0 space-y-1.5">
                     <label class="text-[10px] font-bold text-zinc-400 uppercase tracking-widest ml-1">Start #</label>
                     <input type="number" id="startIndexInput" value="1" min="1" class="w-full bg-white/10 border border-white/20 rounded-lg px-2 py-2.5 text-sm text-center outline-none">
                 </div>
             </div>
 
+            <!-- 撮影条件トグル: 顔ガイドのみ(音声は仕様として一切収録しない) -->
+            <div class="grid grid-cols-1 gap-2">
+                <button id="guideToggle" type="button" class="toggle-btn active py-2 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">Face guide: ON</button>
+            </div>
+
             <div class="flex gap-3">
                 <button id="startBtn" class="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
                     <div class="w-3 h-3 bg-white rounded-full"></div>
-                    <span>START (3-2-1, 10s)</span>
+                    <span>START</span>
                 </button>
-
                 <button id="stopBtn" class="hidden flex-1 py-4 bg-white text-black font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
                     <div class="w-3 h-3 bg-black rounded-sm"></div>
                     <span>STOP</span>
@@ -153,12 +130,14 @@
             </div>
 
             <div id="log" class="text-[10px] text-zinc-400 font-mono text-center opacity-60">
-                Ready to record. Background recording enabled.
+                Ready. Frame-exact 10s (300f@30fps). Each valid take saves VIDEO + JSON sidecar.
             </div>
         </div>
     </div>
 
     <script>
+        const APP_VERSION = '2.0-research';
+
         const preview = document.getElementById('preview');
         const captureCanvas = document.getElementById('captureCanvas');
         const canvasCtx = captureCanvas.getContext('2d');
@@ -170,296 +149,215 @@
         const timerDisplay = document.getElementById('timer');
         const recordingIndicator = document.getElementById('recordingIndicator');
         const resWarning = document.getElementById('resWarning');
+        const modeWarning = document.getElementById('modeWarning');
         const camLabelText = document.getElementById('camLabelText');
         const switchCameraBtn = document.getElementById('switchCamera');
         const uiOverlay = document.getElementById('ui-overlay');
         const countdownOverlay = document.getElementById('countdownOverlay');
         const countdownNumber = document.getElementById('countdownNumber');
+        const faceGuide = document.getElementById('faceGuide');
+        const guideToggle = document.getElementById('guideToggle');
 
-        let selectedAngle = 'pos2'; // デフォルトは中央付近
-
-        function setSelectedAngle(angle) {
-            selectedAngle = angle;
-            angleButtons.forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.angle === angle);
-            });
-        }
-
-        angleButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                if (isRecording || isCountingDown) return; // 録画中/カウントダウン中は変更不可
-                setSelectedAngle(btn.dataset.angle);
-            });
-        });
-
-        // ▼ ここで「常にこのピクセルサイズで録画する」というサイズを固定します。
-        //    端末やカメラの実解像度が違っても、出力される動画は必ずこのサイズになります。
-        //
-        //    [機械学習(features.py = MediaPipe FaceMesh)に最適な解像度の逆算]
-        //    FaceMeshは「BlazeFaceで顔検出 → 顔領域をクロップ → クロップに対してランドマーク回帰」
-        //    というパイプラインで動く。つまりランドマーク精度を決めるのはフレーム全体の解像度ではなく
-        //    「フレーム内で顔が占めるピクセル数」であり、顔クロップが概ね256px四方を超えると
-        //    精度は飽和し、それ以上フレーム解像度を上げても特徴量は改善しない。
-        //
-        //    本撮影条件: 顔が画面の約半分(肩から上)・縦長固定。
-        //    → 顔の高さ ≒ フレーム高さの1/2。顔クロップに256px確保するにはフレーム高さ約512px。
-        //      精度を確実に飽和域に入れるため余裕を見て高さ640pxとすると、顔クロップは約320pxとなり
-        //      FaceMeshの精度上限に十分達する。縦長9:16で幅は 640*9/16 = 360px。
-        //    → 360x640 が「精度は飽和させつつ、データ量・処理を無駄に増やさない」最適点。
-        //      (これ以上高解像度にしても精度は変わらずファイルサイズと処理時間だけ増える)
-        //    近年のスマホ・PCカメラはこの解像度をネイティブで超えるため、アップスケールもほぼ起きない。
+        // ===== 固定録画仕様 =====
         const CAPTURE_WIDTH = 360;
         const CAPTURE_HEIGHT = 640;
         const CAPTURE_FPS = 30;
-
-        // 各テイクの録画秒数は10秒固定（研究プロトコルとして固定）。
         const TAKE_SECONDS = 10;
+        const TOTAL_FRAMES = CAPTURE_FPS * TAKE_SECONDS; // 300
+        const FRAME_INTERVAL_MS = 1000 / CAPTURE_FPS;    // 33.333...
 
-        // 撮影中に「実際はこのソース解像度未満で、アップスケールが発生している」ことを検知するための閾値。
-        // これを下回るソース解像度で録画が行われた場合、画面上に警告を出す。
-        let sourceIsBelowTarget = false;
+        // 検証しきい値
+        const DURATION_TOLERANCE_S = 0.3;                 // 実尺が10s±0.3sを外れたらNG
+        const GAP_MAX_ALLOWED_MS = FRAME_INTERVAL_MS * 2;  // フレーム間隔がこれを超えたら「詰まり」
 
         captureCanvas.width = CAPTURE_WIDTH;
         captureCanvas.height = CAPTURE_HEIGHT;
-        setSelectedAngle(selectedAngle);
 
+        let selectedAngle = 'pos2';
         let mediaRecorder;
         let recordedChunks = [];
         let takeNumber = 1;
         let isRecording = false;
         let currentStream;
-        let canvasStream; // 固定サイズキャンバスから生成する録画用ストリーム
+        let canvasStream;
+        let canvasVideoTrack = null;
+        let manualFrameMode = false;
+        let capturedFrameCount = 0;
         let useFrontCamera = true;
-        let recordingStartTime;
-        let drawLoopRunning = false;
-        let takeTimeoutId = null; // 各テイクの自動停止タイマーID（宙に浮くのを防ぐため保持）
-        let countdownTimeoutIds = []; // カウントダウン中の setTimeout ID群（STOPで中断できるよう保持）
+        let takeTimeoutId = null;
+        let countdownTimeoutIds = [];
         let isCountingDown = false;
 
-        // バックグラウンドでの動作を維持するための Wake Lock
+        // 撮影条件
+        let guideEnabled = true;
+        // 音声は研究仕様として「絶対に収録しない」。getUserMediaでも取得せず、録画ストリームにも含めない。
+
+        // ソース解像度・アップスケール情報(メタデータ用)
+        let sourceIsBelowTarget = false;
+        let sourceWidth = 0, sourceHeight = 0, sourceScaleFactor = 1;
+
+        // バックグラウンド遷移検知(タイミング破壊の検出)
+        let backgroundInterrupted = false;
+
+        // セッション内で保存済みのファイル基底名(重複=取り違え検出)
+        const savedBaseNames = new Set();
+
+        // Wake Lock
         let wakeLock = null;
         async function requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                }
-            } catch (err) {
-                console.error(`${err.name}, ${err.message}`);
-            }
+            try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+            catch (err) { console.error(`${err.name}, ${err.message}`); }
         }
 
-        async function startCamera() {
-            if (currentStream) {
-                currentStream.getTracks().forEach(track => track.stop());
-            }
+        function setSelectedAngle(angle) {
+            selectedAngle = angle;
+            angleButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.angle === angle));
+        }
+        angleButtons.forEach(btn => btn.addEventListener('click', () => {
+            if (isRecording || isCountingDown) return;
+            setSelectedAngle(btn.dataset.angle);
+        }));
+        setSelectedAngle(selectedAngle);
 
-            // 取得したいカメラ映像の解像度は「目標の縦長サイズ」を希望する。
-            // ※以前のバージョンではここを横長 (Math.max/min) で要求していたため、
-            //   スマホでも横長の映像が返ってきてプレビューが横長になるバグがありました。
-            //   ideal はあくまで希望値なので、古いスマホで対応していなくても取得自体は成功し、
-            //   その場合は取得できた最大解像度が使われます（下のcanvas描画で自動的に
-            //   CAPTURE_WIDTH x CAPTURE_HEIGHT にリサイズされるため、出力サイズは常に統一されます）。
+        // 顔ガイド トグル(表示のみ・いつでも可)
+        guideToggle.addEventListener('click', () => {
+            guideEnabled = !guideEnabled;
+            faceGuide.classList.toggle('hidden-guide', !guideEnabled);
+            guideToggle.classList.toggle('active', guideEnabled);
+            guideToggle.textContent = `Face guide: ${guideEnabled ? 'ON' : 'OFF'}`;
+        });
+
+        // バックグラウンド遷移: 録画中にタブ/アプリが隠れたらタイミングが壊れる → 無効化フラグを立てる
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && isRecording) backgroundInterrupted = true;
+        });
+
+        async function startCamera() {
+            if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+
             const idealWidth = CAPTURE_WIDTH;
             const idealHeight = CAPTURE_HEIGHT;
+            const wantAudio = audioEnabled;
 
-            // 試す制約の候補（上から順に試し、失敗したら次を試す）
-            // 1. facingMode指定あり（スマホの前面/背面切り替え用）
-            // 2. facingMode指定なし（PCのWebカメラはfacingMode指定で失敗することがあるため）
             const constraintCandidates = [
-                {
-                    video: {
-                        facingMode: useFrontCamera ? "user" : "environment",
-                        width: { ideal: idealWidth },
-                        height: { ideal: idealHeight }
-                    },
-                    audio: true
-                },
-                {
-                    video: {
-                        width: { ideal: idealWidth },
-                        height: { ideal: idealHeight }
-                    },
-                    audio: true
-                },
-                {
-                    // 解像度指定なし（上記が両方失敗する非常に古い/特殊な端末向けの最終フォールバック）
-                    video: true,
-                    audio: true
-                }
+                { video: { facingMode: useFrontCamera ? "user" : "environment", width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: wantAudio },
+                { video: { width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: wantAudio },
+                { video: true, audio: wantAudio }
             ];
 
             let lastError = null;
+            currentStream = null;
             for (const constraints of constraintCandidates) {
-                try {
-                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-                    lastError = null;
-                    break;
-                } catch (err) {
-                    lastError = err;
-                }
+                try { currentStream = await navigator.mediaDevices.getUserMedia(constraints); lastError = null; break; }
+                catch (err) { lastError = err; }
             }
-
-            if (!currentStream) {
-                log.textContent = "Error: " + (lastError ? lastError.message : "camera unavailable");
-                return;
-            }
+            if (!currentStream) { log.textContent = "Error: " + (lastError ? lastError.message : "camera unavailable"); return; }
 
             preview.srcObject = currentStream;
 
-            if (useFrontCamera) {
-                preview.classList.add('mirror');
-                camLabelText.textContent = "FRONT camera";
-            } else {
-                preview.classList.remove('mirror');
-                camLabelText.textContent = "BACK camera";
-            }
+            if (useFrontCamera) { preview.classList.add('mirror'); camLabelText.textContent = "FRONT camera"; }
+            else { preview.classList.remove('mirror'); camLabelText.textContent = "BACK camera"; }
 
-            // 実際のカメラ映像は固定サイズのキャンバスに描画し、
-            // 録画はそのキャンバスの映像ストリームから行う（＝端末に依らず出力サイズが一定）
-            startDrawLoop();
+            setupCanvasStream();
+            modeWarning.classList.toggle('hidden', manualFrameMode);
 
             const track = currentStream.getVideoTracks()[0];
             const settings = track ? track.getSettings() : {};
-            const srcW = settings.width || 0;
-            const srcH = settings.height || 0;
+            sourceWidth = settings.width || 0;
+            sourceHeight = settings.height || 0;
 
-            // このソース解像度をキャンバスのカバー方式クロップに当てはめた場合の拡大率を計算し、
-            // 1を超えていれば「実質的にアップスケールが発生している」と判定する。
-            let scaleFactor = 1;
-            if (srcW && srcH) {
+            sourceScaleFactor = 1;
+            if (sourceWidth && sourceHeight) {
                 const canvasRatio = CAPTURE_WIDTH / CAPTURE_HEIGHT;
-                const videoRatio = srcW / srcH;
-                scaleFactor = (videoRatio > canvasRatio)
-                    ? CAPTURE_HEIGHT / srcH
-                    : CAPTURE_WIDTH / srcW;
+                const videoRatio = sourceWidth / sourceHeight;
+                sourceScaleFactor = (videoRatio > canvasRatio) ? CAPTURE_HEIGHT / sourceHeight : CAPTURE_WIDTH / sourceWidth;
             }
-            sourceIsBelowTarget = scaleFactor > 1.01;
+            sourceIsBelowTarget = sourceScaleFactor > 1.01;
             resWarning.classList.toggle('hidden', !sourceIsBelowTarget);
 
             log.textContent = sourceIsBelowTarget
-                ? `⚠ Camera source ${srcW}x${srcH} is below target ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} (upscaled ${scaleFactor.toFixed(2)}x)`
-                : `Camera ready (source ${srcW}x${srcH}). Output: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT} (downscaled, no upscaling)`;
+                ? `⚠ Source ${sourceWidth}x${sourceHeight} below target — upscaled ${sourceScaleFactor.toFixed(2)}x`
+                : `Camera ready (source ${sourceWidth}x${sourceHeight}). Output ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}. Mode: ${manualFrameMode ? 'frame-exact' : 'TIME-BASED'}.`;
         }
 
-        // カメラ映像を、指定サイズのキャンバスに「中央クロップでフルカバー」して毎フレーム描画する。
-        //
-        // 【研究データの左右一貫性のための最重要処理】
-        // features.py は左右の非対称性で噛む位置を判定するため、録画データの左右の向きは
-        // 全サンプルで厳密に一致していなければならない。
-        // プレビュー(video要素)には見やすさのため前面カメラ時にミラー(.mirror)をかけるが、
-        // それは【表示だけ】であり、ここでキャンバスに描画する映像には決してミラーを適用しない。
-        // → 前面/背面のどちらで撮っても、録画される映像は常に「カメラが捉えた実際の向き」で統一される。
-        function drawFrameToCanvas() {
-            const vw = preview.videoWidth;
-            const vh = preview.videoHeight;
-
+        function drawCameraFrameToCanvas() {
+            const vw = preview.videoWidth, vh = preview.videoHeight;
             if (vw && vh) {
                 const canvasRatio = CAPTURE_WIDTH / CAPTURE_HEIGHT;
                 const videoRatio = vw / vh;
-
                 let sx, sy, sw, sh;
-                if (videoRatio > canvasRatio) {
-                    // 映像の方が横長 → 左右をクロップ
-                    sh = vh;
-                    sw = vh * canvasRatio;
-                    sx = (vw - sw) / 2;
-                    sy = 0;
-                } else {
-                    // 映像の方が縦長 → 上下をクロップ
-                    sw = vw;
-                    sh = vw / canvasRatio;
-                    sx = 0;
-                    sy = (vh - sh) / 2;
-                }
-
-                // ミラーは一切かけずに描画（＝録画データは常に実際の向き）
+                if (videoRatio > canvasRatio) { sh = vh; sw = vh * canvasRatio; sx = (vw - sw) / 2; sy = 0; }
+                else { sw = vw; sh = vw / canvasRatio; sx = 0; sy = (vh - sh) / 2; }
+                // ミラーは一切かけない(録画データは常に実際の向き)
                 canvasCtx.drawImage(preview, sx, sy, sw, sh, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
             }
-
-            if (drawLoopRunning) {
-                requestAnimationFrame(drawFrameToCanvas);
-            }
         }
 
-        function startDrawLoop() {
-            if (!canvasStream) {
-                // captureStream は一度だけ作成し、使い回す
+        function setupCanvasStream() {
+            if (canvasStream) return;
+            canvasStream = captureCanvas.captureStream(0);
+            canvasVideoTrack = canvasStream.getVideoTracks()[0];
+            if (canvasVideoTrack && typeof canvasVideoTrack.requestFrame === 'function') {
+                manualFrameMode = true;
+            } else {
+                try { canvasStream.getTracks().forEach(t => t.stop()); } catch (e) {}
                 canvasStream = captureCanvas.captureStream(CAPTURE_FPS);
-            }
-            if (!drawLoopRunning) {
-                drawLoopRunning = true;
-                requestAnimationFrame(drawFrameToCanvas);
+                canvasVideoTrack = canvasStream.getVideoTracks()[0];
+                manualFrameMode = false;
             }
         }
+
+        // 時間ベース時のみ使う連続描画ループ
+        let drawLoopRunning = false;
+        function autoDrawLoop() { if (!drawLoopRunning) return; drawCameraFrameToCanvas(); requestAnimationFrame(autoDrawLoop); }
+        function startAutoDrawLoop() { if (!drawLoopRunning) { drawLoopRunning = true; requestAnimationFrame(autoDrawLoop); } }
+        function stopAutoDrawLoop() { drawLoopRunning = false; }
 
         switchCameraBtn.addEventListener('click', () => {
-            // 録画中・カウントダウン中のカメラ切替は、currentStreamの差し替えで録画が壊れる／
-            // 前面・背面が混在して左右定義がブレるため禁止する。
-            if (isRecording || isCountingDown) {
-                log.textContent = "⚠ Cannot switch camera now. Press STOP first.";
-                return;
-            }
+            if (isRecording || isCountingDown) { log.textContent = "⚠ Cannot switch camera now. Press STOP first."; return; }
             useFrontCamera = !useFrontCamera;
             startCamera();
         });
 
-        // 待機状態(START前の見た目)に戻す共通処理。
-        // 手動STOP・自動完了(10秒満了)・中断のいずれからも、必ずここを通って同じ状態に戻す。
         function resetToIdleUI() {
             isRecording = false;
             isCountingDown = false;
-            if (wakeLock) {
-                wakeLock.release();
-                wakeLock = null;
-            }
+            if (wakeLock) { wakeLock.release(); wakeLock = null; }
             startBtn.classList.remove('hidden');
             stopBtn.classList.add('hidden');
             recordingIndicator.classList.add('hidden');
             countdownOverlay.style.display = 'none';
             angleButtons.forEach(btn => btn.disabled = false);
             startIndexInput.disabled = false;
+            audioToggle.disabled = false;
             uiOverlay.style.opacity = "1";
-            timerDisplay.textContent = "00:00";
+            timerDisplay.textContent = "0/300";
         }
 
-        function cancelCountdown() {
-            countdownTimeoutIds.forEach(id => clearTimeout(id));
-            countdownTimeoutIds = [];
-        }
+        function cancelCountdown() { countdownTimeoutIds.forEach(id => clearTimeout(id)); countdownTimeoutIds = []; }
 
         startBtn.addEventListener('click', async () => {
             if (!currentStream) return;
-            if (isRecording || isCountingDown) return; // 二重START防止
+            if (isRecording || isCountingDown) return;
 
-            // 開始番号の検証（1以上の整数）。この番号のまま(増加せず)ファイル名に使われる。
             const startIndex = parseInt(startIndexInput.value, 10);
-            if (!Number.isFinite(startIndex) || startIndex < 1) {
-                log.textContent = "⚠ Start # must be an integer of 1 or more.";
-                return;
-            }
+            if (!Number.isFinite(startIndex) || startIndex < 1) { log.textContent = "⚠ Start # must be an integer of 1 or more."; return; }
 
-            // --- 前回録画の残存状態を明示的に後始末（STOP後に再開できなくなる不具合の防止） ---
-            if (takeTimeoutId !== null) {
-                clearTimeout(takeTimeoutId);
-                takeTimeoutId = null;
-            }
+            if (takeTimeoutId !== null) { clearTimeout(takeTimeoutId); takeTimeoutId = null; }
             if (mediaRecorder) {
                 mediaRecorder.ondataavailable = null;
                 mediaRecorder.onstop = null;
-                if (mediaRecorder.state !== 'inactive') {
-                    try { mediaRecorder.stop(); } catch (e) {}
-                }
+                if (mediaRecorder.state !== 'inactive') { try { mediaRecorder.stop(); } catch (e) {} }
                 mediaRecorder = null;
             }
             recordedChunks = [];
             takeNumber = startIndex;
 
-            // カウントダウン中も、ポジション・番号・カメラ切替は録画中と同様にロックする
-            // （カウントダウン中に条件が変わってしまうのを防ぐため）。
             startBtn.classList.add('hidden');
             stopBtn.classList.remove('hidden');
             angleButtons.forEach(btn => btn.disabled = true);
             startIndexInput.disabled = true;
+            audioToggle.disabled = true;
             uiOverlay.style.opacity = "0.4";
 
             isCountingDown = true;
@@ -467,41 +365,25 @@
 
             const counts = [3, 2, 1];
             counts.forEach((n, i) => {
-                const id = setTimeout(() => {
-                    countdownNumber.textContent = String(n);
-                }, i * 1000);
+                const id = setTimeout(() => { countdownNumber.textContent = String(n); }, i * 1000);
                 countdownTimeoutIds.push(id);
             });
             const goId = setTimeout(async () => {
                 countdownOverlay.style.display = 'none';
                 isCountingDown = false;
                 countdownTimeoutIds = [];
-
                 await requestWakeLock();
                 isRecording = true;
                 recordingIndicator.classList.remove('hidden');
                 startTake();
-                startTimerLoop(); // タイマーの更新を開始（二重起動防止つき）
             }, counts.length * 1000);
             countdownTimeoutIds.push(goId);
         });
 
         stopBtn.addEventListener('click', () => {
-            // カウントダウン中の中断
-            if (isCountingDown) {
-                cancelCountdown();
-                resetToIdleUI();
-                log.textContent = "Countdown canceled.";
-                return;
-            }
-            // 録画中の中断（満了前なので破棄される。reachedFullDurationフラグにより判定）
-            if (takeTimeoutId !== null) {
-                clearTimeout(takeTimeoutId);
-                takeTimeoutId = null;
-            }
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
+            if (isCountingDown) { cancelCountdown(); resetToIdleUI(); log.textContent = "Countdown canceled."; return; }
+            if (takeTimeoutId !== null) { clearTimeout(takeTimeoutId); takeTimeoutId = null; }
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
             resetToIdleUI();
             log.textContent = "Stopped.";
         });
@@ -510,107 +392,205 @@
             if (!isRecording) return;
 
             recordedChunks = [];
-            const mimeTypes = [
-                'video/mp4;codecs=avc1',
-                'video/webm;codecs=vp9',
-                'video/webm'
-            ];
+            capturedFrameCount = 0;
+            backgroundInterrupted = false;
+            const frameTimes = []; // 各pushの t0 相対時刻(ms)。等間隔性の事後検証用。
+
+            const mimeTypes = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'];
             const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
             const options = { mimeType, videoBitsPerSecond: 8000000 };
 
-            // 映像は「固定サイズキャンバス」のトラック、音声はマイクのトラックを合成して録画する
             const combinedStream = new MediaStream([
                 ...canvasStream.getVideoTracks(),
-                ...currentStream.getAudioTracks()
+                ...(audioEnabled ? currentStream.getAudioTracks() : [])
             ]);
 
             mediaRecorder = new MediaRecorder(combinedStream, options);
 
-            const intervalMs = TAKE_SECONDS * 1000;
-            let takeStartMs = 0;
-            // このテイクが「設定時間を満了して自動停止したか」を示すフラグ。
-            // 満了停止(setTimeoutが発火してstop)した場合のみ true になる。
-            // STOPボタンによる途中停止では false のままなので、そのテイクは破棄される。
-            // ※ 時間の実測(Date.now差分)で判定すると、setTimeout→stop→onstopの実行遅延により
-            //   正常な満了テイクの実測長が intervalMs をわずかに前後し、誤判定が起きる。
-            //   そのため「停止理由」で厳密に判定する。
             let reachedFullDuration = false;
+            let t0 = 0;
 
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) recordedChunks.push(e.data);
-            };
+            mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
 
-            mediaRecorder.onstop = () => {
-                const actualDurationMs = Date.now() - takeStartMs;
-                if (reachedFullDuration) {
-                    // 設定時間を満了したテイクのみ保存
-                    saveBlob();
-                    log.textContent = `Saved ${selectedAngle}_${String(takeNumber).padStart(3,'0')}.`;
+            mediaRecorder.onstop = async () => {
+                const spanMs = t0 ? (performance.now() - t0) : 0;
+                stopAutoDrawLoop();
+                const valid = reachedFullDuration && !backgroundInterrupted;
+                if (valid) {
+                    await finalizeSave(spanMs, frameTimes.slice(), mediaRecorder.mimeType);
                 } else {
-                    // 設定時間に満たずに停止したテイク（STOPでの中断）は破棄
                     recordedChunks = [];
-                    log.textContent = `Discarded incomplete take (${(actualDurationMs/1000).toFixed(1)}s < ${(intervalMs/1000).toFixed(1)}s).`;
+                    const reason = backgroundInterrupted
+                        ? 'app was backgrounded — timing invalid'
+                        : `incomplete (${capturedFrameCount}/${TOTAL_FRAMES} frames)`;
+                    log.textContent = `✖ Discarded: ${reason}.`;
                 }
-                // 1テイク=1回の完結した録画のため、満了・中断のいずれでもここでidle状態に戻す
-                // （以前のような「次のテイクへ自動で続ける」ループは行わない）。
                 resetToIdleUI();
             };
 
+            drawCameraFrameToCanvas(); // 先頭黒フレーム防止
+
             mediaRecorder.start();
-            takeStartMs = Date.now();
-            recordingStartTime = takeStartMs; // 各テイク開始時に時刻を記録
+            t0 = performance.now();
 
+            const modeLabel = manualFrameMode ? 'frame-exact' : 'TIME-BASED';
             log.textContent = sourceIsBelowTarget
-                ? `⚠ Recording #${takeNumber} [${selectedAngle}]... UPSCALED (source below ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`
-                : `Recording #${takeNumber} [${selectedAngle}]... (${CAPTURE_WIDTH}x${CAPTURE_HEIGHT})`;
+                ? `⚠ Recording #${takeNumber} [${selectedAngle}]... UPSCALED, ${modeLabel}`
+                : `Recording #${takeNumber} [${selectedAngle}]... ${modeLabel} ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}`;
 
-            takeTimeoutId = setTimeout(() => {
-                if (isRecording && mediaRecorder.state === 'recording') {
-                    reachedFullDuration = true; // 満了による停止であることを記録
-                    mediaRecorder.stop();
-                }
-            }, intervalMs);
-        }
+            if (manualFrameMode) {
+                const pushFrame = () => {
+                    if (!isRecording) return;
+                    drawCameraFrameToCanvas();
+                    try { canvasVideoTrack.requestFrame(); } catch (e) {}
+                    capturedFrameCount++;
+                    frameTimes.push(performance.now() - t0);
+                    timerDisplay.textContent = `${capturedFrameCount}/${TOTAL_FRAMES}`;
 
-        // タイマー更新関数（1テイクは最大10秒固定のため、分の繰り上がりは発生しない。秒数のみ表示）
-        let timerLoopRunning = false;
-        function updateTimer() {
-            if (!isRecording) { timerLoopRunning = false; return; }
-
-            if (recordingStartTime) {
-                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-                const seconds = String(elapsed).padStart(2, '0');
-                timerDisplay.textContent = `00:${seconds}`;
+                    if (capturedFrameCount >= TOTAL_FRAMES) {
+                        reachedFullDuration = true;
+                        takeTimeoutId = setTimeout(() => {
+                            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                        }, FRAME_INTERVAL_MS);
+                        return;
+                    }
+                    const nextTarget = t0 + capturedFrameCount * FRAME_INTERVAL_MS;
+                    const delay = Math.max(0, nextTarget - performance.now());
+                    takeTimeoutId = setTimeout(pushFrame, delay);
+                };
+                pushFrame();
+            } else {
+                startAutoDrawLoop();
+                const stopTarget = t0 + TAKE_SECONDS * 1000;
+                const tick = () => {
+                    if (!isRecording) return;
+                    const now = performance.now();
+                    const elapsedSec = Math.min(TAKE_SECONDS, Math.floor((now - t0) / 1000));
+                    timerDisplay.textContent = `00:${String(elapsedSec).padStart(2, '0')}`;
+                    if (now >= stopTarget) {
+                        reachedFullDuration = true;
+                        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                        return;
+                    }
+                    takeTimeoutId = setTimeout(tick, Math.min(50, stopTarget - now));
+                };
+                tick();
             }
-
-            requestAnimationFrame(updateTimer);
-        }
-        function startTimerLoop() {
-            if (!timerLoopRunning) {
-                timerLoopRunning = true;
-                requestAnimationFrame(updateTimer);
-            }
         }
 
-        function saveBlob() {
-            if (recordedChunks.length === 0) return;
+        // 保存blobの実尺(コンテナduration)を事後検証で取得する(MediaRecorder webmはInfinity対策のシーク trick)。
+        function probeDuration(blob) {
+            return new Promise((resolve) => {
+                const v = document.createElement('video');
+                v.preload = 'metadata';
+                v.muted = true;
+                let settled = false;
+                const finish = (val) => { if (settled) return; settled = true; try { URL.revokeObjectURL(v.src); } catch (e) {} resolve(val); };
+                v.onloadedmetadata = () => {
+                    if (v.duration === Infinity || isNaN(v.duration)) {
+                        v.currentTime = 1e101;
+                        v.ontimeupdate = () => { v.ontimeupdate = null; finish(isFinite(v.duration) ? v.duration : null); };
+                    } else {
+                        finish(v.duration);
+                    }
+                };
+                v.onerror = () => finish(null);
+                setTimeout(() => finish(null), 3000);
+                v.src = URL.createObjectURL(blob);
+            });
+        }
 
-            const blobType = mediaRecorder.mimeType;
-            const blob = new Blob(recordedChunks, { type: blobType });
+        function triggerDownload(blob, filename) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            const baseName = selectedAngle;
-            const ext = blobType.includes('mp4') ? 'mp4' : 'webm';
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 500);
+        }
 
-            a.href = url;
-            a.download = `${baseName}_${String(takeNumber).padStart(3, '0')}.${ext}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+        // 妥当なテイクのみここに来る。VIDEO と JSONサイドカーを保存し、検証結果をログに出す。
+        async function finalizeSave(spanMs, frameTimes, mimeType) {
+            if (recordedChunks.length === 0) return;
 
-            // 番号は自動で増やさない。同じ番号のまま何度でも撮り直せる仕様。
-            // 次の番号に進みたい場合はユーザーがStart #欄を手動で書き換える。
-            setTimeout(() => URL.revokeObjectURL(url), 100);
+            const blob = new Blob(recordedChunks, { type: mimeType });
+            const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+            const base = `${selectedAngle}_${String(takeNumber).padStart(3, '0')}`;
+
+            // --- 検証 ---
+            const containerDuration = await probeDuration(blob);
+
+            let gapStats = null;
+            if (frameTimes.length > 1) {
+                const gaps = [];
+                for (let i = 1; i < frameTimes.length; i++) gaps.push(frameTimes[i] - frameTimes[i - 1]);
+                const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+                const max = Math.max(...gaps), min = Math.min(...gaps);
+                const std = Math.sqrt(gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length);
+                gapStats = { mean_ms: +mean.toFixed(2), min_ms: +min.toFixed(2), max_ms: +max.toFixed(2), jitter_std_ms: +std.toFixed(2) };
+            }
+
+            const durationChecked = containerDuration != null;
+            const durationOk = durationChecked && Math.abs(containerDuration - TAKE_SECONDS) <= DURATION_TOLERANCE_S;
+            const spacingOk = !gapStats || gapStats.max_ms <= GAP_MAX_ALLOWED_MS;
+            const isDuplicate = savedBaseNames.has(base);
+            const passed = durationOk && spacingOk;
+
+            // --- メタデータ(サイドカー) ---
+            const meta = {
+                app: 'Arsena 10s Take Recorder',
+                app_version: APP_VERSION,
+                saved_at: new Date().toISOString(),
+                file: `${base}.${ext}`,
+                position: selectedAngle,
+                take_number: takeNumber,
+                recording_mode: manualFrameMode ? 'frame-exact' : 'time-based',
+                target: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT, fps: CAPTURE_FPS, take_seconds: TAKE_SECONDS, total_frames: TOTAL_FRAMES },
+                requested_frames: manualFrameMode ? capturedFrameCount : null,
+                camera: useFrontCamera ? 'front' : 'back',
+                facing_mode: useFrontCamera ? 'user' : 'environment',
+                audio_recorded: audioEnabled,
+                codec_mime: mimeType,
+                source: { width: sourceWidth, height: sourceHeight, upscaled: sourceIsBelowTarget, scale_factor: +sourceScaleFactor.toFixed(3) },
+                measured: {
+                    wallclock_span_s: +(spanMs / 1000).toFixed(3),
+                    container_duration_s: containerDuration != null ? +containerDuration.toFixed(3) : null,
+                    frame_gap_stats_ms: gapStats
+                },
+                // 各フレームのpush時刻(t0相対ms)。後段でCFR等間隔へ正規化する際に使用。
+                frame_timestamps_ms: frameTimes.map(t => +t.toFixed(2)),
+                verification: {
+                    passed,
+                    duration_checked: durationChecked,
+                    duration_ok: durationOk,
+                    spacing_ok: spacingOk,
+                    duplicate_name_in_session: isDuplicate,
+                    // 注意: requestFrame の呼び出し回数は「エンコード出力フレーム数」を保証しない。
+                    // 最終的な実フレーム数は外部(ffprobe -count_frames)で必ず検証すること。
+                    note: 'requested_frames != guaranteed encoded frames. Verify final frame count with ffprobe -count_frames.'
+                }
+            };
+
+            // --- 保存(VIDEO → JSON) ---
+            triggerDownload(blob, `${base}.${ext}`);
+            const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+            setTimeout(() => triggerDownload(metaBlob, `${base}.json`), 300);
+
+            savedBaseNames.add(base);
+
+            // --- ログ ---
+            const flags = [];
+            if (!durationChecked) flags.push('duration UNVERIFIED');
+            else if (!durationOk) flags.push(`duration ${containerDuration.toFixed(3)}s ≠ 10s`);
+            if (!spacingOk) flags.push(`frame gap ${gapStats.max_ms}ms (jitter)`);
+            if (!manualFrameMode) flags.push('TIME-BASED (variable frames)');
+            if (sourceIsBelowTarget) flags.push('upscaled');
+            if (isDuplicate) flags.push('DUPLICATE name — change Start #');
+
+            if (passed && flags.length === 0) {
+                log.textContent = `✔ Saved ${base} — ${capturedFrameCount}f, dur ${containerDuration.toFixed(3)}s. +JSON.`;
+            } else {
+                log.textContent = `⚠ Saved ${base} but FLAGGED: ${flags.join(' | ')}. +JSON.`;
+            }
         }
 
         startCamera();
