@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arsena's 10s Take Recorder (Research v2)</title>
+    <title>Arsena's 10s Take Recorder (Research v2.1)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
@@ -34,7 +34,6 @@
             z-index: 5;
             pointer-events: none;
         }
-        #faceGuide.hidden-guide { display: none; }
 
         #ui-overlay {
             position: fixed; bottom: 0; left: 0; width: 100%; z-index: 10;
@@ -50,8 +49,6 @@
         }
         .angle-btn.active { background:#dc2626; border-color:#dc2626; color:#fff; }
         .angle-btn:disabled { opacity:0.4; }
-        .toggle-btn.active { background:#16a34a; border-color:#16a34a; color:#fff; }
-        .toggle-btn:disabled { opacity:0.4; }
     </style>
 </head>
 <body class="font-sans text-white">
@@ -61,7 +58,6 @@
     <!-- 顔占有率ガイド(表示のみ・録画非対象) -->
     <svg id="faceGuide" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
         <ellipse cx="180" cy="250" rx="95" ry="150" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2" stroke-dasharray="10 8"/>
-        <text x="180" y="250" fill="rgba(255,255,255,0.6)" font-size="14" text-anchor="middle" font-family="monospace">fit face here</text>
     </svg>
 
     <canvas id="captureCanvas" style="position:fixed; top:-99999px; left:-99999px;"></canvas>
@@ -113,11 +109,6 @@
                 </div>
             </div>
 
-            <!-- 撮影条件トグル: 顔ガイドのみ(音声は仕様として一切収録しない) -->
-            <div class="grid grid-cols-1 gap-2">
-                <button id="guideToggle" type="button" class="toggle-btn active py-2 rounded-lg text-[11px] font-bold bg-white/10 border border-white/20 transition-all active:scale-95">Face guide: ON</button>
-            </div>
-
             <div class="flex gap-3">
                 <button id="startBtn" class="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
                     <div class="w-3 h-3 bg-white rounded-full"></div>
@@ -136,7 +127,7 @@
     </div>
 
     <script>
-        const APP_VERSION = '2.0-research';
+        const APP_VERSION = '2.1-research';
 
         const preview = document.getElementById('preview');
         const captureCanvas = document.getElementById('captureCanvas');
@@ -155,8 +146,6 @@
         const uiOverlay = document.getElementById('ui-overlay');
         const countdownOverlay = document.getElementById('countdownOverlay');
         const countdownNumber = document.getElementById('countdownNumber');
-        const faceGuide = document.getElementById('faceGuide');
-        const guideToggle = document.getElementById('guideToggle');
 
         // ===== 固定録画仕様 =====
         const CAPTURE_WIDTH = 360;
@@ -188,9 +177,10 @@
         let countdownTimeoutIds = [];
         let isCountingDown = false;
 
-        // 撮影条件
-        let guideEnabled = true;
-        // 音声は研究仕様として「絶対に収録しない」。getUserMediaでも取得せず、録画ストリームにも含めない。
+        // 顔ガイド枠は常時表示(表示のみ・録画には一切写り込まない)。
+        // 音声は研究仕様として「絶対に収録しない」。getUserMedia でも取得せず、録画ストリームにも一切含めない。
+        // (旧版に残っていた audioEnabled / audioToggle への参照はすべて削除済み。存在しない変数への参照で
+        //  起動時に ReferenceError が発生し、カメラすら起動しなくなっていたため。)
 
         // ソース解像度・アップスケール情報(メタデータ用)
         let sourceIsBelowTarget = false;
@@ -219,14 +209,6 @@
         }));
         setSelectedAngle(selectedAngle);
 
-        // 顔ガイド トグル(表示のみ・いつでも可)
-        guideToggle.addEventListener('click', () => {
-            guideEnabled = !guideEnabled;
-            faceGuide.classList.toggle('hidden-guide', !guideEnabled);
-            guideToggle.classList.toggle('active', guideEnabled);
-            guideToggle.textContent = `Face guide: ${guideEnabled ? 'ON' : 'OFF'}`;
-        });
-
         // バックグラウンド遷移: 録画中にタブ/アプリが隠れたらタイミングが壊れる → 無効化フラグを立てる
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && isRecording) backgroundInterrupted = true;
@@ -237,12 +219,12 @@
 
             const idealWidth = CAPTURE_WIDTH;
             const idealHeight = CAPTURE_HEIGHT;
-            const wantAudio = audioEnabled;
 
+            // 音声は一切要求しない(audio: false 固定)。
             const constraintCandidates = [
-                { video: { facingMode: useFrontCamera ? "user" : "environment", width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: wantAudio },
-                { video: { width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: wantAudio },
-                { video: true, audio: wantAudio }
+                { video: { facingMode: useFrontCamera ? "user" : "environment", width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: false },
+                { video: { width: { ideal: idealWidth }, height: { ideal: idealHeight } }, audio: false },
+                { video: true, audio: false }
             ];
 
             let lastError = null;
@@ -329,7 +311,6 @@
             countdownOverlay.style.display = 'none';
             angleButtons.forEach(btn => btn.disabled = false);
             startIndexInput.disabled = false;
-            audioToggle.disabled = false;
             uiOverlay.style.opacity = "1";
             timerDisplay.textContent = "0/300";
         }
@@ -357,7 +338,6 @@
             stopBtn.classList.remove('hidden');
             angleButtons.forEach(btn => btn.disabled = true);
             startIndexInput.disabled = true;
-            audioToggle.disabled = true;
             uiOverlay.style.opacity = "0.4";
 
             isCountingDown = true;
@@ -400,10 +380,8 @@
             const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
             const options = { mimeType, videoBitsPerSecond: 8000000 };
 
-            const combinedStream = new MediaStream([
-                ...canvasStream.getVideoTracks(),
-                ...(audioEnabled ? currentStream.getAudioTracks() : [])
-            ]);
+            // 録画ストリームは映像トラックのみ。音声トラックは一切含めない。
+            const combinedStream = new MediaStream(canvasStream.getVideoTracks());
 
             mediaRecorder = new MediaRecorder(combinedStream, options);
 
@@ -544,11 +522,10 @@
                 position: selectedAngle,
                 take_number: takeNumber,
                 recording_mode: manualFrameMode ? 'frame-exact' : 'time-based',
-                target: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT, fps: CAPTURE_FPS, take_seconds: TAKE_SECONDS, total_frames: TOTAL_FRAMES },
                 requested_frames: manualFrameMode ? capturedFrameCount : null,
                 camera: useFrontCamera ? 'front' : 'back',
                 facing_mode: useFrontCamera ? 'user' : 'environment',
-                audio_recorded: audioEnabled,
+                audio_recorded: false,
                 codec_mime: mimeType,
                 source: { width: sourceWidth, height: sourceHeight, upscaled: sourceIsBelowTarget, scale_factor: +sourceScaleFactor.toFixed(3) },
                 measured: {
