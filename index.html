@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Arsena's 10s Take Recorder (Research v2.1)</title>
+    <title>10s Take Recorder (Research v2.1)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body, html { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
         .recording-dot { animation: pulse 1s infinite; }
         @keyframes pulse { 0%{opacity:1;} 50%{opacity:0.3;} 100%{opacity:1;} }
 
-        /* プレビュー映像。録画canvasと同じ9:16枠にcoverで表示する。 */
+        /* プレビュー映像。録画canvasと同じ3:4枠にcoverで表示する(上端基準)。 */
         #preview {
             position: fixed;
             width: min(100vw, calc(100vh * 3 / 4));
@@ -183,7 +183,7 @@
         // (旧版に残っていた audioEnabled / audioToggle への参照はすべて削除済み。存在しない変数への参照で
         //  起動時に ReferenceError が発生し、カメラすら起動しなくなっていたため。)
 
-        // ソース解像度・アップスケール情報(メタデータ用)
+        // ソース解像度・アップスケール情報(アップスケール警告と画面ログ用)
         let sourceIsBelowTarget = false;
         let sourceWidth = 0, sourceHeight = 0, sourceScaleFactor = 1;
 
