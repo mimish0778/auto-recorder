@@ -10,11 +10,11 @@
         .recording-dot { animation: pulse 1s infinite; }
         @keyframes pulse { 0%{opacity:1;} 50%{opacity:0.3;} 100%{opacity:1;} }
 
-        /* プレビュー映像。録画canvasと同じ3:4(縦長)枠にcoverで表示する(上端基準)。 */
+        /* プレビュー映像。録画canvasと同じ9:16(縦長)枠にcoverで表示する(上端基準)。 */
         #preview {
             position: fixed;
-            width: min(100vw, calc(100vh * 3 / 4));
-            height: calc(min(100vw, calc(100vh * 3 / 4)) * 4 / 3);
+            width: min(100vw, calc(100vh * 9 / 16));
+            height: calc(min(100vw, calc(100vh * 9 / 16)) * 16 / 9);
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             object-fit: cover;
@@ -24,12 +24,12 @@
         }
         #preview.mirror { transform: translate(-50%, -50%) scaleX(-1); }
 
-        /* 顔占有率を全被験者で揃えるためのガイド枠。プレビュー枠(3:4)と厳密に一致させる。
+        /* 顔占有率を全被験者で揃えるためのガイド枠。プレビュー枠(9:16)と厳密に一致させる。
            表示のみ・録画には一切写り込まない(video/canvasとは別レイヤー、pointer-events無効)。 */
         #faceGuide {
             position: fixed;
-            width: min(100vw, calc(100vh * 3 / 4));
-            height: calc(min(100vw, calc(100vh * 3 / 4)) * 4 / 3);
+            width: min(100vw, calc(100vh * 9 / 16));
+            height: calc(min(100vw, calc(100vh * 9 / 16)) * 16 / 9);
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             z-index: 5;
@@ -43,7 +43,7 @@
             transition: transform 0.3s ease;
         }
         #ui-inner {
-            width: min(100vw, calc(100vh * 3 / 4));
+            width: min(100vw, calc(100vh * 9 / 16));
             max-width: 100%;
             padding-left: 16px; padding-right: 16px;
             box-sizing: border-box;
@@ -57,8 +57,8 @@
     <video id="preview" autoplay playsinline muted class="mirror"></video>
 
     <!-- 顔占有率ガイド(表示のみ・録画非対象) -->
-    <svg id="faceGuide" viewBox="0 0 720 960" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-        <ellipse cx="360" cy="340" rx="195" ry="255" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2" stroke-dasharray="14 10"/>
+    <svg id="faceGuide" viewBox="0 0 540 960" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="270" cy="400" rx="195" ry="255" fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2" stroke-dasharray="14 10"/>
     </svg>
 
     <canvas id="captureCanvas" style="position:fixed; top:-99999px; left:-99999px;"></canvas>
@@ -149,8 +149,8 @@
         const countdownNumber = document.getElementById('countdownNumber');
 
         // ===== 固定録画仕様 =====
-        const CAPTURE_WIDTH = 720;
-        const CAPTURE_HEIGHT = 960;   // 3:4 縦長 (720x960)。下顔面(顎・咬筋)の縦方向の余白を確保しつつ高解像度で収録。
+        const CAPTURE_WIDTH = 540;
+        const CAPTURE_HEIGHT = 960;   // 540x960 (縦長9:16)。高さ960はソース等倍を保つため固定。幅を540に削って左右の背景だけを除去(顔の大きさは不変)。
         const CAPTURE_FPS = 30;
         const TAKE_SECONDS = 10;
         const TOTAL_FRAMES = CAPTURE_FPS * TAKE_SECONDS; // 300
