@@ -269,9 +269,10 @@
                 const canvasRatio = CAPTURE_WIDTH / CAPTURE_HEIGHT;
                 const videoRatio = vw / vh;
                 let sx, sy, sw, sh;
-                // 縦クロップは上端基準(sy=0)。上端はそのまま、下側を落とす。横は中央基準。
-                if (videoRatio > canvasRatio) { sh = vh; sw = vh * canvasRatio; sx = (vw - sw) / 2; sy = 0; }
-                else { sw = vw; sh = vw / canvasRatio; sx = 0; sy = 0; }
+                // 目標比率に合わせてクロップ。横は中央基準・縦は上端基準。
+                // 今の設定(540:960)ではソース(720:960)に対して左右がトリミングされる(下の分岐)。
+                if (videoRatio > canvasRatio) { sh = vh; sw = vh * canvasRatio; sx = (vw - sw) / 2; sy = 0; } // 横を中央でトリミング
+                else { sw = vw; sh = vw / canvasRatio; sx = 0; sy = 0; }                                     // 縦を上端でトリミング
                 // ミラーは一切かけない(録画データは常に実際の向き)
                 canvasCtx.drawImage(preview, sx, sy, sw, sh, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
             }
