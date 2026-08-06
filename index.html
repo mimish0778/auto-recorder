@@ -450,7 +450,14 @@
         stopBtn.addEventListener('click', () => {
             if (isCountingDown) { cancelCountdown(); resetToIdleUI(); log.textContent = "Countdown canceled."; return; }
             if (takeTimeoutId !== null) { clearTimeout(takeTimeoutId); takeTimeoutId = null; }
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                // 録画中の中断: 停止フラグだけ立て、破棄処理とUI復帰は onstop に一任する。
+                // (ここで resetToIdleUI() を呼ぶと onstop の "✖ Discarded" ログと競合し、
+                //  破棄されたのか保存されたのか判別できなくなるため。)
+                isRecording = false;
+                mediaRecorder.stop();
+                return;
+            }
             resetToIdleUI();
             log.textContent = "Stopped.";
         });
